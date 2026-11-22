@@ -1,0 +1,31 @@
+@use "utilities/convert";
+
+div.color-command {
+  margin: 1em 0;
+  line-height: 0;
+
+  .highlight {
+    border-bottom-right-radius: 0;
+    border-bottom-left-radius: 0;
+
+    &:not(:first-child) {
+      border-top-left-radius: 0;
+      border-top-right-radius: 0;
+
+      pre {
+        margin-top: 0;
+      }
+    }
+  }
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset > div.color-command {
+    margin-right:  convert.px2rem(-16px);
+    margin-left: convert.px2rem(-16px);
+
+    .highlight code {
+      border-radius: 0;
+    }
+  }
+}

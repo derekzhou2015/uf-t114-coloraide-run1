@@ -1,0 +1,28 @@
+@use "utilities/convert";
+
+.md-typeset div.ace_scrollbar {  /* stylelint-disable-line selector-class-pattern */
+
+  scrollbar-color: var(--md-default-fg-color--lighter) transparent;
+  scrollbar-width: thin;
+
+  &:hover {
+    scrollbar-color: var(--md-accent-fg-color) transparent;
+  }
+
+  &::-webkit-scrollbar {
+      width: convert.px2rem(4px);
+      height: convert.px2rem(4px);
+  }
+
+  &::-webkit-scrollbar-corner {
+    background-color: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--md-default-fg-color--lighter);
+
+    *:hover {
+      background-color: var(--md-accent-fg-color);
+    }
+  }
+}

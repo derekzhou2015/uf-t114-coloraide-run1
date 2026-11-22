@@ -1,0 +1,1510 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ColorAide Color Space Models</title>
+    <style type="text/css">
+        :root {
+          --text: black;
+          --header-footer: hsl(0, 0%, 100%, 0.1);
+          --transparency: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill-opacity="0.1"><rect width="50" height="50" /><rect x="50" y="50" width="50" height="50" /></svg>')
+  0 0 / 20px 20px #fefefe;
+        }
+
+        .dark {
+          --text: white;
+          --header-footer: hsl(0, 0%, 0%, 0.1);
+        }
+
+        body {
+          font-family: "Helvetica Neue", Helvetica, "Segoe UI", Arial, freesans, sans-serif;
+          padding: 0;
+          margin: 0;
+          background: var(--transparency);
+          min-height: 100vh;
+          position: relative;
+        }
+
+        a {
+          color: var(--text);
+          font-weight: 800;
+          text-decoration: underline;
+        }
+
+        #display {
+          color: var(--text);
+          min-height: 100vh;
+          position: relative;
+        }
+
+        #main {
+          text-align: center;
+        }
+
+        header, footer {
+            padding: 16px;
+            background: var(--header-footer);
+            color: var(--text);
+            box-sizing: border-box;
+        }
+
+        h1 {
+          display: inline-block;
+          padding: 0;
+          margin: 0;
+        }
+
+        footer {
+          position: absolute;
+          text-align: center;
+          bottom: 0;
+          left: 0;
+          width: 100%;
+        }
+
+        #model {
+          display: flex;
+          justify-content: center;
+          padding-bottom: 6em;
+        }
+
+        #model > .plot-container {
+            width: unset !important;
+            height: unset !important;
+        }
+
+        #color-space {
+          font-size: 1rem;
+          padding: 1rem 0;
+          margin: auto;
+        }
+
+        .input-wrap {
+            white-space: nowrap;
+        }
+
+        #color-space select,
+        #color-space button {
+          font-size: 1rem;
+          margin: 0.5em;
+        }
+
+        .loading{
+          position: fixed;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          left: 0;
+          z-index: 2;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(0,0,0,.5);
+          -webkit-backdrop-filter: blur(2px);
+          backdrop-filter: blur(2px)
+        }
+
+        .loading .loader{
+          position: relative;
+          top: 50%;
+          left: 50%;
+          width: 80px;
+          height: 80px;
+          margin-top: -40px;
+          margin-left: -40px;
+          border-style: solid;
+          border-width: 10px;
+          border-top-color: #0ff;
+          border-right-color: #ff0;
+          border-bottom-color: #0f0;
+          border-left-color: #f0f;
+          border-radius: 50%;
+          animation: spin 2s linear infinite
+        }
+
+        .loading .loader~div{
+          position: absolute;
+          top: 52%;
+          width: 100%;
+          margin-top: 40px;
+          font-weight: 800;
+          font-size: 2rem;
+          text-align: center;
+          color: white;
+        }
+
+        .loading.relative{
+          position: absolute
+        }
+
+        .loading.relative .loader{
+          width: 2em;
+          height: 2em;
+          margin-top: -1em;
+          margin-left: -1em;
+          border-width: .4em
+        }
+
+        .loading.relative .loader~div{
+          display: none
+        }
+
+        @keyframes spin{
+          0% {transform:rotate(0)}
+          100% {transform:rotate(-360deg)}
+        }
+    </style>
+</head>
+<body>
+<div id="display">
+<header>
+    <h1>ColorAide Color Space Models</h1>
+</header>
+
+<div id="main">
+<div id="color-space">
+  <span class='input-wrap'>
+    <label for="spaces">Color Space:</label>
+    <select name="spaces" id="spaces">
+    </select>
+  </span>
+  <span class='input-wrap'>
+    <label for="gamuts">Gamut Space:</label>
+    <select name="gamuts" id="gamuts">
+    </select>
+  </span><br>
+  <span class='input-wrap'>
+    <input type="checkbox" id="edges" name="edges">
+    <label for="edges">Edges</label>
+  </span>
+  <span class='input-wrap'>
+    <input type="checkbox" id="aspect" name="aspect">
+    <label for="aspect">Preserve Aspect Ratio</label>
+  </span>
+  <span class='input-wrap'>
+    <input type="checkbox" id="ortho" name="ortho">
+    <label for="ortho">Orthographic</label>
+  </span><br>
+  <button id="button" type="button">Generate</button>
+</div>
+
+<div id="model"></div>
+
+</div>
+<footer>
+  <div>Created with <a href="/coloraide/demos" target="_blank", rel="noopener">ColorAide</a></div>
+  <div>Copyright &copy; 2020 - 2025 <a href="https://github.com/facelessuser">Isaac Muse</a></div>
+</footer>
+</div>
+<script src="https://cdn.plot.ly/plotly-4.1.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pyodide@314.0.7/pyodide.min.js"></script>
+<script id="init" type="text/python">
+from coloraide.everything import ColorAll as Color
+from coloraide.spaces import Prism, Luminant
+import json
+ignore = {'prismatic', 'cmyk'}
+ignore_gamut = {'acescct', 'acescc', 'xyz-d50', 'xyz-d65'}
+add_gamuts = {'hpluv',}
+options = {'spaces': [], 'gamuts': []}
+for key, value in sorted(Color.CS_MAP.items()):
+    if key in ignore:
+        continue
+    options['spaces'].append(key)
+    if key in ignore_gamut:
+        continue
+    if (isinstance(value, Prism) and not isinstance(value, Luminant)) or key in add_gamuts:
+        options['gamuts'].append(key)
+options['gamuts'].append('pointer-gamut')
+options['gamuts'].append('macadam-limits')
+options['gamuts'].append('visible-spectrum')
+json.dumps(options)
+</script>
+<script id="payload" type="text/python">
+"""Plot color space using Plotly."""
+from scipy.spatial import Delaunay
+import plotly.graph_objects as go
+import math
+import plotly.io as io
+from coloraide.everything import ColorAll as Color
+from coloraide.channels import ANGLE_DEG
+from coloraide.spaces import HSLish, HSVish, HWBish, Labish, LChish, RGBish
+from coloraide import algebra as alg
+from coloraide.color import POSTFIX
+from coloraide.gamut import macadam_limits, pointer
+from coloraide.spectrum import wavelength_to_color
+from coloraide.cmfs import CIE_1931_2DEG as cmfs
+from coloraide import util
+
+FORCE_OWN_GAMUT = {'ryb', 'ryb-biased'}
+QHULL_OPTIONS = "Qbb Qc Qz Qx Q12 QbB"
+
+
+def get_face_color(cmap, simplex, filters):
+    """Get best color."""
+
+    return Color.average([cmap[simplex[0]], cmap[simplex[1]], cmap[simplex[2]]], space='srgb').to_string(hex=True)
+
+
+def create_custom_hsl(gamut):
+    """Create a custom color object that has access to a special `hsl-gamut` space to map surface in."""
+
+    cs = Color.CS_MAP[gamut]
+    hsl = Color.CS_MAP['hsl']
+    scale = not isinstance(cs, RGBish)
+
+    class HSL(type(hsl)):
+        NAME = f'-hsl-{gamut}'
+        BASE = gamut
+        SERIALIZE = (f'--{NAME}',)
+        GAMUT_CHECK = gamut
+        CLIP_SPACE = None
+        WHITE = cs.WHITE
+        DYAMIC_RANGE = cs.DYNAMIC_RANGE
+        INDEXES = cs.indexes()
+
+        # Scale channels as needed
+        OFFSET_1 = cs.channels[INDEXES[0]].low if scale else 0.0
+        OFFSET_2 = cs.channels[INDEXES[1]].low if scale else 0.0
+        OFFSET_3 = cs.channels[INDEXES[2]].low if scale else 0.0
+
+        SCALE_1 = cs.channels[INDEXES[0]].high if scale else 1.0
+        SCALE_2 = cs.channels[INDEXES[1]].high if scale else 1.0
+        SCALE_3 = cs.channels[INDEXES[2]].high if scale else 1.0
+
+        def to_base(self, coords):
+            """Convert from RGB to HSL."""
+
+            # Convert from HSL back to its original space
+            coords = hsl.to_base(coords)
+            # Scale and offset the values back to the origin space's configuration
+            coords[0] = coords[0] * (self.SCALE_1 - self.OFFSET_1) + self.OFFSET_1
+            coords[1] = coords[1] * (self.SCALE_2 - self.OFFSET_2) + self.OFFSET_2
+            coords[2] = coords[2] * (self.SCALE_3 - self.OFFSET_3) + self.OFFSET_3
+            ordered = [0.0, 0.0, 0.0]
+            # Consistently order a given color spaces points based on its type
+            for e, c in enumerate(coords):
+                ordered[self.INDEXES[e]] = c
+            return ordered
+
+        def from_base(self, coords):
+            """Convert from HSL to RGB."""
+
+            # Undo order a given color spaces points based on its type
+            coords = [coords[i] for i in self.INDEXES]
+            # Scale and offset the values such that channels are between 0 - 1
+            coords[0] = (coords[0] - self.OFFSET_1) / (self.SCALE_1 - self.OFFSET_1)
+            coords[1] = (coords[1] - self.OFFSET_2) / (self.SCALE_2 - self.OFFSET_2)
+            coords[2] = (coords[2] - self.OFFSET_3) / (self.SCALE_3 - self.OFFSET_3)
+            # Convert to HSL
+            return hsl.from_base(coords)
+
+    class ColorCyl(Color):
+        """Custom color."""
+
+    ColorCyl.register(HSL())
+
+    return ColorCyl
+
+
+def create3d(fig, x, y, z, tri, cmap, edges, faces, ecolor, fcolor, opacity, filters):
+    """Create the 3D renders."""
+
+    i, j, k = tri.simplices.T
+    if opacity:
+        mesh = go.Mesh3d(
+            x=x,
+            y=y,
+            z=z,
+            i=i,
+            j=j,
+            k=k,
+            vertexcolor=cmap if not faces else None,
+            facecolor=[
+                get_face_color(cmap, t, filters) if not fcolor else fcolor for t in tri.simplices
+            ] if faces else None,
+            flatshading = True,
+            lighting = {"vertexnormalsepsilon": 0, "facenormalsepsilon": 0}
+        )
+        mesh.update(hoverinfo='skip')
+        mesh.update(opacity=opacity)
+        fig.add_traces([mesh])
+
+    if edges:
+        # Draw the triangles, but ensure they are separate by adding `None` to the end.
+        xe = []
+        ye = []
+        ze = []
+        tri_colors = []
+        for p0, p1, p2 in tri.simplices:
+            xe.extend([x[p0], x[p1], x[p2], x[p0], None])
+            ye.extend([y[p0], y[p1], y[p2], y[p0], None])
+            ze.extend([z[p0], z[p1], z[p2], z[p0], None])
+            if ecolor is None:
+                tri_colors.extend([cmap[p0], cmap[p1], cmap[p2], cmap[p0], '#000000'])
+
+        # Use a single color for edges.
+        if ecolor is not None:
+            tri_colors = ecolor
+
+        lines = go.Scatter3d(
+            x=xe,
+            y=ye,
+            z=ze,
+            mode='lines',
+            marker={'size':0},
+            showlegend=False,
+            name='',
+            line={'color': tri_colors}
+        )
+        lines.update(hoverinfo='skip')
+        fig.add_traces([lines])
+
+
+def cyl_disc(
+    fig,
+    ColorCyl,
+    space,
+    gamut,
+    location,
+    resolution,
+    opacity,
+    edges,
+    faces,
+    ecolor,
+    fcolor,
+    gmap,
+    flags,
+    filters,
+    limit
+):
+    """
+    Plot cylindrical disc on either top or bottom of an RGB cylinder.
+
+    Expectation is either a HSL, HSV, or HSB style cylinder.
+    """
+
+    cs = ColorCyl.CS_MAP[gamut]
+    factor = cs.channels[1].high
+
+    # Using a lightness of 0 can sometimes cause the bottom not to show with certain resolutions, so use a very
+    # small value instead.
+    zpos = alg.ATOL if location == 'bottom' else 1.0 * factor
+
+    x = []
+    y = []
+    z = []
+    u = []
+    v = []
+    cmap = []
+
+    min_hue = cs.channels[cs.hue_index()].low
+    max_hue = cs.channels[cs.hue_index()].high
+
+    # Interpolate a circle on the outer edge
+    s1 = ColorCyl.steps(
+        [ColorCyl(gamut, [hue, 1 * factor, 1 * zpos]) for hue in alg.linspace(min_hue, max_hue, 2, endpoint=True)],
+        steps=max(7, (resolution // 6) * 6 + 1),
+        space=gamut,
+        hue='specified'
+    )
+    s2 = ColorCyl(gamut, [alg.NaN, alg.ATOL, alg.NaN])
+
+    # Interpolate concentric circles to the center of the disc
+    step = int(resolution / 2)
+    for r in range(step):
+        for t1 in s1:
+            s2['hue'] = t1['hue']
+            c = t1.mix(s2, r / (step - 1), space=gamut, hue='specified')
+            hue = c._space.hue_index()
+            radius = c._space.radial_index()
+            u.append(c[radius])
+            v.append(c[hue])
+            if limit['pointer-gamut']:
+                c.fit('pointer-gamut')
+            elif limit['macadam-limits']:
+                c.fit('macadam-limits')
+            elif limit['visible-spectrum']:
+                c.fit('visible-spectrum')
+            c.convert(space, norm=False, in_place=True)
+
+            store_coords(c, x, y, z, flags)
+
+            # Ensure colors fit in output color gamut.
+            s = c.convert('srgb')
+            if not s.in_gamut():
+                s.fit(**gmap)
+            else:
+                s.clip()
+
+            if filters:
+                s.filter(filters[0], **filters[1], in_place=True, out_space=s.space()).clip()
+
+            cmap.append(s.to_string(hex=True))
+
+    # Calculate triangles
+    tri = Delaunay([*zip(u, v)], qhull_options=QHULL_OPTIONS)
+
+    create3d(fig, x, y, z, tri, cmap, edges, faces, ecolor, fcolor, opacity, filters)
+
+
+def store_coords(c, x, y, z, flags):
+    """Store coordinates."""
+
+    # LCh spaces
+    if flags['is_lchish']:
+        light, chroma, hue = c._space.indexes()
+        h = (c[hue] * (360 / c._space.channels[hue].high)) if c._space.channels[hue] != ANGLE_DEG else c[hue]
+        a, b = alg.polar_to_rect(c[chroma], h)
+        x.append(a)
+        y.append(b)
+        z.append(c[light])
+
+    # HSL, HSV, or HWB spaces
+    elif flags['is_hslish'] or flags['is_hsvish'] or flags['is_hwbish']:
+        hue, sat, light = c._space.indexes()
+        h = (c[hue] * (360 / c._space.channels[hue].high)) if c._space.channels[hue] != ANGLE_DEG else c[hue]
+        a, b = alg.polar_to_rect(c[sat], h)
+        x.append(a)
+        y.append(b)
+        z.append(c[light])
+
+    # Any other generic cylindrical space that doesn't fit in the categories above.
+    elif flags['is_cyl']:
+        hue = c._space.hue_index()
+        h = (c[hue] * (360 / c._space.channels[hue].high)) if c._space.channels[hue] != ANGLE_DEG else c[hue]
+        radius = c._space.radial_index()
+        a, b = alg.polar_to_rect(c[radius], h)
+        x.append(a)
+        y.append(b)
+        z.append(c[3 - hue - radius])
+
+    # Lab spaces
+    elif flags['is_labish']:
+        light, a, b = c._space.names()
+        x.append(c[a])
+        y.append(c[b])
+        z.append(c[light])
+
+    # Non-cylindrical spaces could be done here, but normally are not.
+    else:
+        x.append(c[0])
+        y.append(c[1])
+        z.append(c[2])
+
+
+def render_space_cyl(fig, space, gamut, resolution, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit):
+    """Renders the color space using an HSL cylinder that is then mapped to the given space."""
+
+    target = Color.CS_MAP[space]
+    flags = {
+        'is_cyl': target.is_polar(),
+        'is_labish': isinstance(target, Labish),
+        'is_lchish': isinstance(target, LChish),
+        'is_hslish': isinstance(target, HSLish),
+        'is_hwbish': isinstance(target, HWBish),
+        'is_hsvish': isinstance(target, HSVish)
+    }
+
+    # Determine the gamut mapping space to use.
+    # Some spaces cannot be generalized (HWB and HPLuv for instance).
+    if flags['is_hwbish']:
+        ColorCyl = Color
+        gspace = space
+    elif Color.CS_MAP[gamut].is_polar():
+        ColorCyl = Color
+        gspace = gamut
+    else:
+        _gamut = space if space in FORCE_OWN_GAMUT else gamut
+        ColorCyl = create_custom_hsl(_gamut)
+        gspace = f'-hsl-{_gamut}'
+    cs = ColorCyl.CS_MAP[gspace]
+
+    # Adjust scaling factor if the mapping space requires it
+    factor = cs.channels[1].high
+
+    # Render the two halves of the cylinder
+    u = []
+    v = []
+    x = []
+    y = []
+    z = []
+    cmap = []
+
+    # Interpolate the cylinder from 0 to 360 degrees.
+    # Include, at the very least, 6 evenly spaced hues, and at higher resolutions
+    # will include a multiple that will include the same 6 key points.
+    # In HSL, this will cover all the corners of the RGB space.
+    min_hue = cs.channels[cs.hue_index()].low
+    max_hue = cs.channels[cs.hue_index()].high
+
+    s1 = ColorCyl.steps(
+        [ColorCyl(gspace, [hue, 1 * factor, 1 * factor]) for hue in alg.linspace(min_hue, max_hue, 2, endpoint=True)],
+        steps=max(7, (resolution // 6) * 6 + 1),
+        space=gspace,
+        hue='specified'
+    )
+    # A generic color at the bottom of the space which we can rotate for
+    # interpolation by changing the hue.
+    s2 = ColorCyl(gspace, [alg.NaN, 1 * factor, alg.ATOL])
+
+    # Create a 3D mesh by interpolating ring at each lightness down the cylinder side.
+    # Include at least 3 points of lightness: lightest, darkest, and mid, which in
+    # HSL is the most colorful colors.
+    for color in s1:
+        s2['hue'] = color['hue']
+        for c in ColorCyl.steps([color, s2], steps=max(3, (resolution // 2) * 2 + 1), space=gspace, hue='specified'):
+            u.append(c[2])
+            v.append(c['hue'])
+            if limit['pointer-gamut']:
+                c.fit('pointer-gamut')
+            elif limit['macadam-limits']:
+                c.fit('macadam-limits')
+            elif limit['visible-spectrum']:
+                c.fit('visible-spectrum')
+
+            c.convert(space, norm=False, in_place=True)
+
+            store_coords(c, x, y, z, flags)
+
+            # Adjust gamut to fit the display space
+            s = c.convert('srgb')
+            if not s.in_gamut():
+                s.fit(**gmap)
+            else:
+                s.clip()
+
+            if filters:
+                s.filter(filters[0], **filters[1], in_place=True, out_space=s.space()).clip()
+
+            cmap.append(s.to_string(hex=True))
+
+    # Calculate the triangles
+    tri = Delaunay([*zip(u, v)], qhull_options=QHULL_OPTIONS)
+
+    create3d(fig, x, y, z, tri, cmap, edges, faces, ecolor, fcolor, opacity, filters)
+
+    # Generate tops for spaces that do not normally get tops automatically.
+    if (flags['is_hwbish'] or (flags['is_cyl'] and not flags['is_lchish']) or isinstance(cs, HSVish)):
+        cyl_disc(
+            fig, ColorCyl, space, gspace, 'top', resolution, opacity, edges,
+            faces, ecolor, fcolor, gmap, flags, filters, limit
+        )
+
+    cyl_disc(
+        fig, ColorCyl, space, gspace, 'bottom', resolution, opacity, edges,
+        faces, ecolor, fcolor, gmap, flags, filters, limit
+    )
+
+    return fig
+
+
+def render_spectrum_face(
+    fig, s1, s2, dim, space, resolution, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit
+):
+    """Render the visible spectrum face."""
+
+    target = Color.CS_MAP[space]
+    flags = {
+        'is_cyl': target.is_polar(),
+        'is_labish': isinstance(target, Labish),
+        'is_lchish': isinstance(target, LChish),
+        'is_hslish': isinstance(target, HSLish),
+        'is_hwbish': isinstance(target, HWBish),
+        'is_hsvish': isinstance(target, HSVish)
+    }
+
+    x = []
+    y = []
+    z = []
+    X = []
+    Y = []
+    Z = []
+    cmap = []
+
+    w780 = util.xyz_to_xyY(wavelength_to_color(780))[:-1]
+
+    # Render a face by taking two interpolated sides and interpolating the points across the face
+    for c1, c2 in zip(s1, s2):
+        for t in alg.linspace(c1, c2, resolution):
+            x.append(t[0])
+            y.append(t[1])
+            z.append(t[2])
+
+            dx, dy = util.xyz_to_xyY(wavelength_to_color(t[0]))[:-1]
+            fx, fy = w780
+            xy = alg.lerp(fx, dx, t[2]), alg.lerp(fy, dy, t[2])
+
+            c = Color('xyy', [xy[0], xy[1], t[1]])
+
+            for lim in limit:
+                if 'visible-spectrum' != lim and limit[lim]:
+                    c.fit(lim)
+
+            c.convert(space, norm=False, in_place=True)
+            store_coords(c, X, Y, Z, flags)
+
+            # Fit colors to output gamut
+            s = c.convert('srgb')
+            if not s.in_gamut():
+                s.fit(**gmap)
+            else:
+                s.clip()
+            cmap.append(s.to_string(hex=True))
+
+    # Calculate triangles
+    tri = Delaunay([*zip(locals().get(dim[0]), locals().get(dim[1]))], qhull_options=QHULL_OPTIONS)
+    create3d(fig, X, Y, Z, tri, cmap, edges, faces, ecolor, fcolor, opacity, filters)
+
+
+def render_visible_spectrum(fig, space, res, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit):
+    """
+    Render the visible spectrum.
+
+    Visible spectrum is rendered like a cube using a simpler approach as shown
+    here: Simple approach used https://prototypestudios.neocities.org/dlm.
+
+    Draw a line from each wavelength to 780nm and interpolate a point between.
+    """
+
+    # Six corners of the cube
+    c000 = [360, 0, 0]
+    c111 = [780, 1, 1]
+    c100 = [780, 0, 0]
+    c010 = [360, 1, 0]
+    c001 = [360, 0, 1]
+    c110 = [780, 1, 0]
+    c011 = [360, 1, 1]
+    c101 = [780, 0, 1]
+
+    # Interpolate two sides of a given face and interpolate the rest
+    s1 = alg.linspace(c110, c111, res)
+    s2 = alg.linspace(c010, c011, res)
+    s3 = alg.linspace(c100, c101, res)
+    s4 = alg.linspace(c000, c001, res)
+    render_spectrum_face(
+        fig, s1, s2, ('x', 'z'), space, res, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit
+    )
+    render_spectrum_face(
+        fig, s1, s3, ('y', 'z'), space, res, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit
+    )
+    render_spectrum_face(
+        fig, s3, s4, ('x', 'z'), space, res, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit
+    )
+    render_spectrum_face(
+        fig, s4, s2, ('y', 'z'), space, res, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit
+    )
+    s1 = alg.linspace(c001, c011, res)
+    s2 = alg.linspace(c101, c111, res)
+    render_spectrum_face(
+        fig, s1, s2, ('x', 'y'), space, res, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit
+    )
+    s1 = alg.linspace(c000, c010, res)
+    s2 = alg.linspace(c100, c110, res)
+    render_spectrum_face(
+        fig, s1, s2, ('x', 'y'), space, res, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit
+    )
+
+    return fig
+
+
+def render_special_gamut(gtype, fig, space, resolution, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit):
+    """Render the Pointer gamut in 3d."""
+
+    if gtype == 'visible-spectrum':
+        return render_visible_spectrum(
+            fig, space, resolution, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit
+        )
+
+    target = Color.CS_MAP[space]
+    flags = {
+        'is_cyl': target.is_polar(),
+        'is_labish': isinstance(target, Labish),
+        'is_lchish': isinstance(target, LChish),
+        'is_hslish': isinstance(target, HSLish),
+        'is_hwbish': isinstance(target, HWBish),
+        'is_hsvish': isinstance(target, HSVish)
+    }
+
+    # Render the two halves of the cylinder
+    u = []
+    v = []
+    x = []
+    y = []
+    z = []
+    cmap = []
+
+    if gtype == 'pointer-gamut':
+        l_range = [100, *pointer.LIGHTNESS, 0]
+        lightness = pointer.LIGHTNESS
+        hues = pointer.HUE
+        lut = pointer.LUT
+        f = lambda color, a, b, c: color.GAMUT_MAP['pointer-gamut'].from_lch(color, [a, b, c])
+    elif gtype == 'macadam-limits':
+        l_range = macadam_limits.LUMINANCE[:]
+        lightness = macadam_limits.LUMINANCE[:]
+        # Needed as 3D plots have difficulty with high precision deltas
+        l_range[1] = 1e-6
+        lightness[1] = 1e-6
+        hues = macadam_limits.HUE
+        lut = macadam_limits.LUT
+        f = lambda color, a, b, c: color.update(
+            'xyy',
+            [*alg.add(alg.polar_to_rect(b, c), color.CS_MAP['xyz-d65'].WHITE), a]
+        )
+    else:
+        raise ValueError(f"Unknown special of gamut '{gtype}'")
+
+    mn_l = min(lightness)
+    mx_l = max(lightness)
+
+    for l in l_range:
+        for h in hues:
+            color = Color('xyz-d65', [0, 0, 0])
+            if l < mn_l or l > mx_l:
+                # Force an end cap for those that don't have one
+                _l = mn_l - alg.ATOL if l < mn_l else mx_l + alg.ATOL
+                c = alg.ATOL
+            else:
+                _l = l
+                c = lut[hues.index(h)][lightness.index(l)]
+            u.append(_l)
+            v.append(h)
+            color = f(color, _l, c, h)
+
+            for lim in limit:
+                if gtype != lim and limit[lim]:
+                    color.fit(lim)
+
+            color.convert(space, norm=False, in_place=True)
+            store_coords(color, x, y, z, flags)
+
+            # Adjust gamut to fit the display space
+            s = color.convert('srgb')
+            if not s.in_gamut():
+                s.fit(**gmap)
+            else:
+                s.clip()
+
+            if filters:
+                s.filter(filters[0], **filters[1], in_place=True, out_space=s.space()).clip()
+
+            cmap.append(s.to_string(hex=True))
+
+    # Calculate the triangles
+    tri = Delaunay([*zip(u, v)], qhull_options=QHULL_OPTIONS)
+    create3d(fig, x, y, z, tri, cmap, edges, faces, ecolor, fcolor, opacity, filters)
+    return fig
+
+
+def plot_gamut_in_space(
+    space,
+    gamuts,
+    title="",
+    dark=False,
+    gmap=None,
+    size=(800, 800),
+    camera=None,
+    aspect=None,
+    projection='perspective',
+    filters=()
+):
+    """Plot the given space in sRGB."""
+
+    if gmap is None:
+        gmap = {}
+
+    io.templates.default = 'plotly_dark' if dark else 'plotly'
+
+    if camera is None:
+        camera = {'a': 45, 'e': 45, 'r': math.sqrt(1.25 ** 2 + 1.25 ** 2 + 1.25 ** 2)}
+
+    a = math.radians((90 - camera['a']) % 360)
+    e = math.radians(90 - camera['e'])
+    r = camera['r']
+    y = r * math.sin(e) * math.cos(a)
+    x = r * math.sin(e) * math.sin(a)
+    z = r * math.cos(e)
+
+    if aspect is None:
+        aspect = {'x': 1, 'y': 1, 'z': 1}
+
+    # Get names for
+    target = Color.CS_MAP[space]
+    if len(target.CHANNELS) > 3:
+        print('Color spaces with dimensions greater than 3 are not supported')
+        return None
+
+    names = target.CHANNELS
+    is_cyl = target.is_polar()
+    is_labish = isinstance(target, Labish)
+    is_lchish = isinstance(target, LChish)
+    is_hslish_hsvish = isinstance(target, (HSLish, HSVish))
+
+    # Setup axes
+    if is_labish:
+        c1, c2, c3 = target.indexes()
+        axm = [c2, c3, c1]
+    elif is_lchish:
+        c1, c2, c3 = target.indexes()
+        axm = [c3, c2, c1]
+    elif is_hslish_hsvish:
+        axm = [0, 1, 2]
+    else:
+        axm = [0, 1, 2]
+
+    showbackground = True
+    backgroundcolor = "rgb(230, 230, 230)" if not dark else '#282830'
+    gridcolor = "rgb(255, 255, 255)" if not dark else '#111'
+    zerolinecolor = "rgb(255, 255, 255)" if not dark else '#111'
+    axis = {
+        "showbackground": showbackground,
+        "backgroundcolor": backgroundcolor,
+        "gridcolor": gridcolor,
+        "zerolinecolor": zerolinecolor,
+    }
+
+    if not is_cyl:
+        xaxis = str(names[axm[0]])
+    else:
+        max_angle = target.channels[target.hue_index()].high
+        if max_angle == 360:
+            xaxis = f"{names[axm[0]]} (0˚ - 360˚)"
+        elif max_angle == math.tau:
+            xaxis = f"{names[axm[0]]} (0 rad - 2π rad)"
+        else:
+            min_angle = target.channels[target.hue_index()].low
+            type_angle = target.channels[target.hue_index()].angle
+            xaxis = (
+                f"{names[axm[0]]} ({alg.round_to(min_angle, 5)} {POSTFIX[type_angle]} - "
+                f"{alg.round_to(max_angle, 5)} {POSTFIX[type_angle]})"
+            )
+
+    yaxis = str(names[axm[1]])
+    zaxis = str(names[axm[2]])
+
+    # Setup plot layout
+    layout = go.Layout(
+        # General figure characteristics
+        title=title,
+        width=size[0],
+        height=size[1],
+
+        # Specify scene layout
+        scene=go.layout.Scene(
+            xaxis=go.layout.scene.XAxis(title=xaxis, showticklabels=not is_cyl, **axis),
+            yaxis=go.layout.scene.YAxis(title=yaxis, **axis),
+            zaxis=go.layout.scene.ZAxis(title=zaxis, **axis),
+            aspectratio=aspect
+        ),
+
+        # Control camera position
+        scene_camera={
+            "projection": go.layout.scene.camera.Projection(type=projection),
+            "center": {"x": 0, "y": 0, "z": 0},
+            "up": {"x": 0, "y": 0, "z": 1},
+            "eye": {"x": x, "y": y, "z": z}
+        }
+    )
+
+    # Create figure to store the plot
+    fig = go.Figure(layout=layout)
+
+    for gamut, config in gamuts.items():
+        opacity = config.get('opacity', 1)
+        resolution = config.get('resolution', 200)
+        edges = config.get('edges', False)
+        ecolor = None
+        limit = {
+            'pointer-gamut': config.get('pointer-gamut', False),
+            'macadam-limits': config.get('macadam-limits', False),
+            'visible-spectrum': config.get('visible-spectrum', False)
+        }
+        if isinstance(edges, str):
+            c = Color(edges).convert('srgb').fit(**gmap)
+            if filters:
+                c.filter(filters[0], **filters[1], in_place=True, out_space=c.space()).clip()
+            ecolor = c.to_string(hex=True, alpha=False)
+            edges = True
+        faces = config.get('faces', False)
+        fcolor = ''
+        if isinstance(faces, str):
+            c = Color(faces).convert('srgb').fit(**gmap)
+            if filters:
+                c.filter(filters[0], **filters[1], in_place=True, out_space=c.space()).clip()
+            fcolor = c.to_string(hex=True, alpha=False)
+            faces = True
+
+        if gamut in Color.GAMUT_MAP:
+            render_special_gamut(
+                gamut, fig, space, resolution, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit
+            )
+        else:
+            render_space_cyl(
+                fig, space, gamut, resolution, opacity, edges, faces, ecolor, fcolor, gmap, filters, limit
+            )
+
+    return fig
+
+
+def plot_colors(fig, space, gamut, gmap_colors, colors, gmap, filters=()):
+    """Plot gamut mapping."""
+
+    if not gmap_colors and not colors:
+        return
+
+    gamut_mapping = gmap_colors.split(';') if gmap_colors.strip() else []
+    non_mapped = colors.split(';') if colors.strip() else []
+    if gamut_mapping or non_mapped:
+        target = Color.CS_MAP[space]
+        flags = {
+            'is_cyl': target.is_polar(),
+            'is_labish': isinstance(target, Labish),
+            'is_lchish': isinstance(target, LChish),
+            'is_hslish': isinstance(target, HSLish),
+            'is_hwbish': isinstance(target, HWBish),
+            'is_hsvish': isinstance(target, HSVish)
+        }
+
+        l = len(gamut_mapping)
+        for i, c in enumerate(gamut_mapping + non_mapped):
+            c1 = Color(c)
+            c2 = Color(c).fit(gamut, **gmap)
+            c1.convert(space, in_place=True)
+            c2.convert(space, in_place=True)
+            x = []
+            y = []
+            z = []
+            for c in ([c1, c2] if i < l else [c1]):
+                store_coords(c, x, y, z, flags)
+
+            c2.convert('srgb', in_place=True).fit(**gmap)
+            if filters:
+                c2.filter(filters[0], **filters[1], in_place=True, out_space=c2.space()).clip()
+
+            fig.add_trace(
+                go.Scatter3d(
+                    x=x, y=y, z=z,
+                    line={'color': 'black', 'width': 2},
+                    marker={
+                        'color': c2.to_string(hex=True, alpha=False),
+                        'size': [16, 0],
+                        'opacity': 1,
+                        'line': {'width': 2}
+                    },
+                    showlegend=False
+                )
+            )
+
+
+def plot_interpolation(
+    fig,
+    space,
+    interp_colors,
+    interp_method,
+    gmap,
+    simulate_alpha,
+    interp_gmap,
+    filters=(),
+    opacity=1
+):
+    """Plot interpolations."""
+
+    if not interp_colors:
+        return
+
+    inputs = interp_colors.split(';')
+    colors = Color.steps(
+        inputs,
+        **interp_method
+    )
+
+    options = interp_method.copy()
+    options['steps'] = len(inputs)
+
+    markers = [Color(i) for i in interp_colors.split(';')]
+
+    target = Color.CS_MAP[space]
+    flags = {
+        'is_cyl': target.is_polar(),
+        'is_labish': isinstance(target, Labish),
+        'is_lchish': isinstance(target, LChish),
+        'is_hslish': isinstance(target, HSLish),
+        'is_hwbish': isinstance(target, HWBish),
+        'is_hsvish': isinstance(target, HSVish)
+    }
+
+    for i in range(2):
+        x = []
+        y = []
+        z = []
+        cmap = []
+        for c in (markers if i else colors):
+            c.convert(space, in_place=True)
+            if interp_gmap:
+                c.fit('srgb', **gmap)
+            store_coords(c, x, y, z, flags)
+            c.convert('srgb', in_place=True)
+            c.fit(**gmap)
+            if filters:
+                c.filter(filters[0], **filters[1], in_place=True, out_space=c.space()).clip()
+            if simulate_alpha:
+                cmap.append(Color.layer([c, 'white'], space='srgb').to_string(hex=True, alpha=False))
+            else:
+                cmap.append(c.to_string(hex=True, alpha=False))
+
+        if i:
+            trace = go.Scatter3d(
+                x=x, y=y, z=z,
+                mode = 'markers',
+                marker={'color': cmap, 'opacity': 1},
+                showlegend=False
+            )
+        else:
+            trace = go.Scatter3d(
+                x=x, y=y, z=z,
+                mode = 'lines',
+                line={'color': cmap, 'width': 16},
+                showlegend=False
+            )
+
+        if opacity < 1:
+            trace.update(opacity=opacity)
+        fig.add_trace(trace)
+
+
+def plot_harmony(
+    fig,
+    space,
+    harmony,
+    gmap,
+    simulate_alpha,
+    harmony_gmap,
+    filters=()
+):
+    """Plot color harmony."""
+
+    if not harmony:
+        return
+
+    hcolor, options = harmony
+    if 'space' not in options:
+        options['space'] = space
+    options['out_space'] = space
+
+    colors = Color(hcolor).harmony(**options)
+
+    target = Color.CS_MAP[space]
+    flags = {
+        'is_cyl': target.is_polar(),
+        'is_labish': isinstance(target, Labish),
+        'is_lchish': isinstance(target, LChish),
+        'is_hslish': isinstance(target, HSLish),
+        'is_hwbish': isinstance(target, HWBish),
+        'is_hsvish': isinstance(target, HSVish)
+    }
+
+    cmap = []
+    x = []
+    y = []
+    z = []
+    for s in colors:
+        c = s.normalize(nans=False)
+        if harmony_gmap:
+            c.fit('srgb', **gmap)
+        store_coords(c, x, y, z, flags)
+        c.convert('srgb', in_place=True).fit(**gmap)
+        if filters:
+            c.filter(filters[0], **filters[1], in_place=True, out_space=c.space()).clip()
+        if simulate_alpha:
+            cmap.append(Color.layer([c, 'white'], space='srgb').to_string(hex=True, alpha=False))
+        else:
+           cmap.append(c.to_string(hex=True, alpha=False))
+
+    if options['name'] in ('wheel', 'rectangle', 'square', 'triad'):
+        x.append(x[0])
+        y.append(y[0])
+        z.append(z[0])
+        cmap.append(cmap[0])
+        size = ([8] * (len(x) - 1)) + [0]
+    else:
+        size = [8] * len(x)
+
+    trace = go.Scatter3d(
+        x=x, y=y, z=z,
+        marker={'size': size, 'color': cmap, 'opacity': 1},
+        line={'color': cmap, 'width': 3},
+        showlegend=False
+    )
+
+    fig.add_trace(trace)
+
+
+def plot_average(
+    fig,
+    space,
+    avg_colors,
+    avg_options,
+    gmap,
+    simulate_alpha,
+    avg_gmap,
+    filters=()
+):
+    """Plot interpolations."""
+
+    if not avg_colors:
+        return
+
+    parts = avg_colors.split(':')
+
+    colors = parts[0].split(';')
+    if len(parts) == 2:
+        weights = [float(i.strip()) for i in parts[1].split(',')]
+    else:
+        weights = None
+
+    color = Color.average(
+        colors,
+        weights,
+        space=avg_options['space']
+    )
+
+    target = Color.CS_MAP[space]
+    flags = {
+        'is_cyl': target.is_polar(),
+        'is_labish': isinstance(target, Labish),
+        'is_lchish': isinstance(target, LChish),
+        'is_hslish': isinstance(target, HSLish),
+        'is_hwbish': isinstance(target, HWBish),
+        'is_hsvish': isinstance(target, HSVish)
+    }
+
+    for s in colors:
+        x = []
+        y = []
+        z = []
+        cmap = []
+        c = Color(s).convert(space, in_place=True).normalize(nans=False)
+        if avg_gmap:
+            c.fit('srgb', **gmap)
+        store_coords(c, x, y, z, flags)
+        c.convert('srgb', in_place=True).fit(**gmap)
+        if filters:
+            c.filter(filters[0], **filters[1], in_place=True, out_space=c.space()).clip()
+        if simulate_alpha:
+            cmap.append(Color.layer([c, 'white'], space='srgb').to_string(hex=True, alpha=False))
+        else:
+           cmap.append(c.to_string(comma=True, alpha=False))
+
+        c = Color(color).convert(space, in_place=True).normalize(nans=False)
+        if avg_gmap:
+            c.fit('srgb', **gmap)
+        store_coords(c, x, y, z, flags)
+        c.convert('srgb', in_place=True).fit(**gmap)
+        if filters:
+            c.filter(filters[0], **filters[1], in_place=True, out_space=c.space()).clip()
+        if simulate_alpha:
+            cmap.append(Color.layer([c, 'white'], space='srgb').to_string(hex=True, alpha=False))
+        else:
+            cmap.append(c.to_string(hex=True, alpha=False))
+
+        trace = go.Scatter3d(
+            x=x, y=y, z=z,
+            marker={'size': [8, 16], 'color': cmap, 'opacity': 1},
+            line={'color': cmap[0], 'width': 3},
+            showlegend=False
+        )
+
+        fig.add_trace(trace)
+
+
+def plot_spectral_locus(fig, space):
+    """Plot the spectral locus."""
+
+    target = Color.CS_MAP[space]
+    white = target.WHITE
+
+    flags = {
+        'is_cyl': target.is_polar(),
+        'is_labish': isinstance(target, Labish),
+        'is_lchish': isinstance(target, LChish),
+        'is_hslish': isinstance(target, HSLish),
+        'is_hwbish': isinstance(target, HWBish),
+        'is_hsvish': isinstance(target, HSVish)
+    }
+
+    x = []
+    y = []
+    z = []
+    cmap = []
+    labels = []
+    for w in range(360, 781, 1):
+        color = Color.from_wavelength(space, w, scale=False)
+        store_coords(color, x, y, z, flags)
+        cmap.append(
+            color.convert(
+                'srgb', in_place=True).fit('srgb-linear', method='scale', max_saturation=True
+            ).to_string(hex=True, alpha=False)
+        )
+        if not w % 20:
+            labels.append(str(w))
+        else:
+            labels.append('')
+    first, last = util.xyz_to_xyY(cmfs[360]), util.xyz_to_xyY(cmfs[780])
+    for r in range(50):
+        color = Color.chromaticity(
+            space,
+            [alg.lerp(last[x], first[x], r / 49) for x in range(3)],
+            'xy-1931',
+            white=white,
+            scale=False
+        )
+        store_coords(color, x, y, z, flags)
+        cmap.append(
+            color.convert(
+                'srgb', in_place=True).fit('srgb-linear', method='scale', max_saturation=True
+            ).to_string(hex=True, alpha=False)
+        )
+        labels.append('')
+
+    trace = go.Scatter3d(
+        x=x, y=y, z=z,
+        text = labels,
+        mode='lines',
+        line={'color': cmap, 'width': 8},
+        showlegend=False
+    )
+    fig.add_trace(trace)
+</script>
+<script type="text/javascript">
+let pyodide = null
+let busyTarget = null
+let colorSpaces = null
+let colorGamuts = null
+let lastModel = null
+let package = 'coloraide-8.16-py3-none-any.whl'
+const defaultSpace = 'lab'
+const defaultGamut = 'srgb'
+const exceptions = new Set(['hwb', 'ryb', 'ryb-biased'])
+const base = `${window.location.origin}/${window.location.pathname.split('/')[1]}/playground/`
+package = base + package
+
+async function showBusy(target, label, relative) {
+  // Show busy indicator
+
+  const loaderLabel = (typeof label === "undefined" || label === null) ? "Loading..." : label
+  const classes = relative ? "loading relative" : "loading"
+  const template = document.createElement("template")
+  template.innerHTML = `<div class="${classes}"><div class="loader"></div><div>${loaderLabel}</div></div>`
+  target.appendChild(template.content.firstChild)
+}
+
+function hideBusy(target) {
+  // Hide busy indicator
+
+  const loading = target.querySelector(".loading")
+  if (loading) {
+    target.removeChild(target.querySelector(".loading"))
+  }
+}
+
+function encodeuri(uri) {
+  // Encode the URI component.
+
+  return encodeURIComponent(uri).replace(/[.!'()*]/g, c => {
+    return `%${c.charCodeAt(0).toString(16)}`
+  })
+}
+
+async function popState() {
+  // Handle history
+
+  const base = window.location.pathname.split('/')[1]
+  if (
+    window.location.pathname === `/${base}/demos/3d_models.html`
+  ) {
+    const params = new URLSearchParams(window.location.search)
+    let space = (params.has('space')) ? params.get('space') : defaultSpace
+    if (!colorSpaces.includes(space)) {
+        space = defaultSpace
+    }
+    let gamut = (params.has('gamut')) ? params.get('gamut') : defaultGamut
+    if (!colorGamuts.includes(gamut)) {
+        gamut = defaultGamut
+    }
+    const edges = (params.has('edges') && params.get('edges').toLowerCase() == 'true') ? true : false
+    const aspect = (params.has('aspect') && params.get('aspect').toLowerCase() == 'true') ? true : false
+    const ortho = (params.has('ortho') && params.get('ortho').toLowerCase() == 'true') ? true : false
+
+    document.getElementById('spaces').value = space
+    document.getElementById('gamuts').value = gamut
+    document.getElementById('edges').checked = edges
+    document.getElementById('aspect').checked = aspect
+    document.getElementById('ortho').checked = ortho
+
+    showBusy(busyTarget, 'Generating 3D Model...')
+    await generate3D(space, gamut, edges, aspect, ortho, false)
+    hideBusy(busyTarget)
+  }
+}
+
+async function generate3D(space, gamut, edges, aspect, ortho, push_history) {
+  if (
+    lastModel && space === lastModel[0] && gamut === lastModel[1] &&
+    edges === lastModel[2] && aspect === lastModel[3] && ortho === lastModel[4]) {
+      return
+  }
+
+  if (exceptions.has(space)) {
+    gamut = space
+    if (gamut === 'hwb') {
+        gamut = 'srgb'
+    }
+    document.getElementById('gamuts').value = gamut
+  }
+
+  if (push_history) {
+    const uri = encodeuri(space)
+    const uri2 = encodeuri(gamut)
+    const uri3 = (edges) ? 'true' : 'false'
+    const uri4 = (aspect) ? 'true' : 'false'
+    const uri5 = (ortho) ? 'true' : 'false'
+    history.pushState(
+      {space: uri},
+      "",
+      `?${new URLSearchParams(`space=${uri}&gamut=${uri2}&edges=${uri3}&aspect=${uri4}&ortho=${uri5}`).toString()}`
+    )
+  }
+  lastModel = [space, gamut, edges, aspect, ortho]
+  const ratio = (aspect) ? [0, 0, 0] : [1, 1, 1]
+  const projection = (ortho) ? 'orthographic' : 'perspective'
+  const div = document.querySelector('div#model')
+  div.innerHTML = ""
+  let data = await pyodide.runPythonAsync(
+    document.getElementById('payload').innerHTML + `
+fig = plot_gamut_in_space(
+    '${space}',
+    {
+        "${gamut}": {
+            "edges": ${(edges) ? 'True' : 'False'},
+            "opacity": ${(edges) ? '0.2' : '1'},
+            "resolution": ${(edges) ? '50' : '80'}
+        }
+    },
+    title="${gamut} gamut rendered in the ${space} space",
+    size=(600, 600),
+    aspect={'x': ${ratio[0]}, 'y': ${ratio[1]}, 'z': ${ratio[2]}},
+    projection='${projection}',
+    gmap={'method': 'raytrace'}
+)
+
+fig.to_json()
+`)
+  Plotly.newPlot(div,  JSON.parse(data))
+}
+
+/* Randomize background color */
+async function randomizeColor() {
+    let randReturn = JSON.parse(await pyodide.runPythonAsync(`
+import json
+from coloraide.everything import ColorAll as Color
+c = Color.random('hsl', limits=[(0, 360), (0.3, 1), (0.3, 0.8)]).set('alpha', 0.75)
+dark = Color.layer([c, 'white']).contrast('black') < 4.5
+json.dumps({'color': c.to_string(), 'dark': dark})
+`))
+  const display = document.getElementById('display')
+  display.setAttribute('style', `background-color: ${randReturn['color']}`)
+  if (randReturn['dark']) {
+    display.classList.add('dark')
+  } else {
+    display.classList.remove('dark')
+  }
+}
+
+/* Initialize page as soon as page is available. */
+document.addEventListener("DOMContentLoaded", async () => {
+  // Setup Pyodide
+  busyTarget = document.getElementsByTagName('body')[0]
+  showBusy(busyTarget, 'Setting up Environment...')
+  pyodide = await loadPyodide({
+    indexURL: "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/",
+    fullStdLib: false
+  })
+
+  // Load ColorAide
+  await pyodide.loadPackage([
+    'numpy',
+    'scipy',
+    'narwhals',
+    'https://files.pythonhosted.org/packages/e5/7d/905a3a3d51087515719058c94cfbda2ff0fc14417c20d557ae3e82d8b250/plotly-7.1.0-py3-none-any.whl',
+    package])
+
+  // Set background color
+  await randomizeColor()
+
+  // Initialize
+  const data = await pyodide.runPythonAsync(document.getElementById('init').innerHTML)
+  const colorOptions = JSON.parse(data)
+  colorSpaces = colorOptions['spaces']
+  colorGamuts = colorOptions['gamuts']
+  const options = document.getElementById('spaces')
+  for (const key of colorSpaces) {
+    const opt = document.createElement('option')
+    opt.innerHTML = key
+    opt.setAttribute('value', key)
+    if (key === defaultSpace) {
+      opt.setAttribute('selected', 'selected')
+    }
+    options.append(opt)
+  }
+  const options2 = document.getElementById('gamuts')
+  for (const key of colorGamuts) {
+    const opt = document.createElement('option')
+    opt.innerHTML = key
+    opt.setAttribute('value', key)
+    if (key === defaultGamut) {
+      opt.setAttribute('selected', 'selected')
+    }
+    options2.append(opt)
+  }
+  const button = document.getElementById('button')
+  const check = document.getElementById('edges')
+  const check2 = document.getElementById('aspect')
+  const check3 = document.getElementById('ortho')
+  button.addEventListener('click', async e => {
+    showBusy(busyTarget, 'Generating 3D Model...')
+    await randomizeColor()
+    await generate3D(options.value, options2.value, check.checked, check2.checked, check3.checked, true)
+    hideBusy(busyTarget)
+  })
+  hideBusy(busyTarget)
+
+  // Determine default properties
+  const params = new URLSearchParams(window.location.search)
+  let space = (params.has('space')) ? params.get('space') : defaultSpace
+  if (!colorSpaces.includes(space)) {
+      space = defaultSpace
+  }
+  let gamut = (params.has('gamut')) ? params.get('gamut') : defaultGamut
+  if (!colorGamuts.includes(gamut)) {
+      gamut = defaultGamut
+  }
+  const edges = (params.has('edges') && params.get('edges').toLowerCase() == 'true') ? true : false
+  const aspect = (params.has('aspect') && params.get('aspect').toLowerCase() == 'true') ? true : false
+  const ortho = (params.has('ortho') && params.get('ortho').toLowerCase() == 'true') ? true : false
+  options.value = space
+  options2.value = gamut
+  check.checked = edges
+  check2.checked = aspect
+  check3.checked = ortho
+
+  // Handle history of pages as they are loaded dynamically
+  window.addEventListener("popstate", popState)
+
+  // Generate initial model
+  showBusy(busyTarget, 'Generating 3D Model...')
+  await generate3D(space, gamut, edges, aspect, ortho, true)
+  hideBusy(busyTarget)
+})
+</script>
+</body>
+</html>

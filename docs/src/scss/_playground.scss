@@ -1,0 +1,272 @@
+@use "utilities/convert";
+
+.md-header {
+  z-index: 5;
+}
+
+/* stylelint-disable */
+.ace-dracula {
+  .ace_marker-layer .ace_active-line {
+    background: hsl(245, 25%, 25%);
+  }
+
+  .ace_gutter-active-line {
+    color: #f8f8f2;
+    background-color: hsl(245, 25%, 25%);
+  }
+}
+
+[data-md-color-scheme="default"] {
+  .ace-dracula {
+    color: #1F1F1F;
+    background-color: #F5F5F5;
+
+    .ace_gutter {
+      color: #635D97;
+      background: #F5F5F5;
+    }
+
+    .ace_print-margin {
+      width: 1px;
+      background: #44475a;
+    }
+
+    .ace_cursor {
+      color: #1F1F1F;
+    }
+
+    .ace_marker-layer .ace_selection {
+      background: #CFCFDE;
+    }
+
+    .ace_multiselect .ace_selection.ace_start {
+      box-shadow: 0 0 3px 0px #282a36;
+      border-radius: 2px;
+    }
+
+    .ace_marker-layer .ace_step {
+      background: #90f485;
+    }
+
+    .ace_marker-layer .ace_bracket {
+      margin: -1px 0 0 -1px;
+      border: 1px solid #836E15;
+    }
+
+    .ace_marker-layer .ace_active-line {
+      background: #DCDEEF;
+    }
+
+    .ace_gutter-active-line {
+      color: #1F1F1F;
+      background-color: #DCDEEF;
+    }
+
+    .ace_marker-layer .ace_selected-word {
+      box-shadow: 0px 0px 0px 1px #ead57b;
+      border-radius: 3px;
+    }
+
+    .ace_fold {
+      background-color: #14720A;
+      border-color: #f8f8f2;
+    }
+
+    .ace_keyword {
+      color: #A3134D;
+    }
+
+    .ace_constant.ace_language {
+      color: #644AC9;
+    }
+
+    .ace_constant.ace_numeric {
+      color: #644AC9;
+    }
+
+    .ace_constant.ace_character {
+      color: #644AC9;
+    }
+
+    .ace_constant.ace_character.ace_escape {
+      color: #A3134D;
+    }
+
+    .ace_constant.ace_other {
+      color: #644AC9;
+    }
+
+    .ace_support.ace_function {
+      color: #036A96;
+    }
+
+    .ace_support.ace_constant {
+      color: #036A96;
+    }
+
+    .ace_support.ace_class {
+      font-style: italic;
+      color: #036A96;
+    }
+
+    .ace_support.ace_type {
+      font-style: italic;
+      color: #036A96;
+    }
+
+    .ace_storage {
+      color: #A3134D;
+    }
+
+    .ace_storage.ace_type {
+      font-style: italic;
+      color: #036A96;
+    }
+
+    .ace_invalid {
+      color: #F8F8F0;
+      background-color: #A3134D;
+    }
+
+    .ace_invalid.ace_deprecated {
+      color: #F8F8F0;
+      background-color: #644AC9;
+    }
+
+    .ace_string {
+      color: #836E15;
+    }
+
+    .ace_comment {
+      color: #635D97;
+    }
+
+    .ace_variable {
+      color: #14720A;
+    }
+
+    .ace_variable.ace_parameter {
+      font-style: italic;
+      color: #A34D14;
+    }
+
+    .ace_entity.ace_other.ace_attribute-name {
+      color: #14720A;
+    }
+
+    .ace_entity.ace_name.ace_function {
+      color: #14720A;
+    }
+
+    .ace_entity.ace_name.ace_tag {
+      color: #A3134D;
+    }
+    .ace_invisible {
+      color: #635D97aa;
+    }
+  }
+}
+/* stylelint-enable */
+
+div.playground {
+  display: flow-root;
+
+  pre {
+    text-align: left;
+  }
+}
+
+.playground-code {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: convert.px2rem(1px) solid var(--md-code-border-color);
+  border-top-left-radius: convert.px2rem(9.6px);
+  border-top-right-radius: convert.px2rem(9.6px);
+}
+
+.playground-code .highlight code {
+  min-height: 3em;
+}
+
+.playground-code .highlight,
+.playground-code .highlight code {
+  margin: 0;
+  overflow: hidden;
+}
+
+.playground-code pre {
+  margin: 0;
+}
+
+.playground-results pre > code {
+  display: block;
+  min-height: 3em;
+}
+
+.playground-results pre {
+  margin-bottom: 0;
+}
+
+.playground-results .swatch-bar {
+  min-height: calc(3em + 1px);
+}
+
+.playground-results .swatch-bar:empty {
+  display: none;
+}
+
+.playground-results .swatch-bar:empty + .highlight {
+  border-color: transparent;
+}
+
+.playground-results .color-command {
+  margin-bottom: 0;
+}
+
+.hidden {
+  display: none;
+}
+
+.playground-results .color-command > .highlight:first-child code,
+.playground-results .color-command > .swatch-bar:empty + .highlight code {
+  border-top-left-radius: convert.px2rem(9.6px);
+  border-top-right-radius: convert.px2rem(9.6px);
+}
+
+.playground-footer {
+  display: flex;
+  margin-top: convert.px2em(-1px);
+  margin-bottom: 1em;
+  padding: convert.px2em(3px, 13.6px) convert.px2em(16px, 13.6px) convert.px2em(8px, 16px);
+  overflow: hidden;
+  color: var(--md-code-hl-comment-color);
+  font-size: convert.px2em(13.6px);
+  background: var(--md-code-bg-color);
+  border: convert.px2rem(1px) solid var(--md-code-border-color);
+  border-top-width: 0;
+  border-bottom-right-radius: convert.px2rem(9.6px);
+  border-bottom-left-radius: convert.px2rem(9.6px);
+
+  hr {
+    margin: 0 0 convert.px2em(2px, 13.6px) 0;
+  }
+
+  .spacer {
+    flex-grow: 1;
+    width: 100%;
+  }
+
+  .footer-status {
+    white-space: nowrap;
+  }
+
+  .session {
+    padding-right: 1em;
+  }
+}
+
+.md-typeset .playground pre>code {
+  border-radius: 0;
+}

@@ -1,0 +1,140 @@
+@use "utilities/convert";
+
+.color-wheel {
+  --color-wheel-stops1: transparent;
+  --color-wheel-stops2: transparent;
+  --color-wheel-stops3: transparent;
+  --color-wheel-stops4: transparent;
+  --color-wheel-stops5: transparent;
+  --color-wheel-bg: var(--md-default-bg-color);
+
+  margin: 0;
+  overflow-y: hidden;
+  background: var(--transparency);
+  background-size: 1em 1em;
+  border: 1px solid var(--swatch-border-color);
+  border-bottom-width: 0;
+
+  // Firefox scrollbar and thumb
+  scrollbar-color: var(--md-default-fg-color--lighter) transparent;
+  scrollbar-width: thin;
+
+  // Override native scrollbar styles
+  &::-webkit-scrollbar {
+    width: convert.px2rem(4px);
+    height: convert.px2rem(4px);
+  }
+
+  &::-webkit-scrollbar-corner {
+    background-color: transparent;
+  }
+
+  // Scrollbar thumb
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--md-default-fg-color--lighter);
+
+    // Hovered scrollbar thumb
+    &:hover {
+      background-color: var(--md-accent-fg-color);
+    }
+  }
+
+  // Firefox hovered scrollbar and thumb
+  &:hover {
+    scrollbar-color: var(--md-accent-fg-color) transparent;
+  }
+
+  div {
+    overflow: clip;
+  }
+
+  .wheel {
+    min-width: max-content;
+    padding: convert.px2em(5px);
+
+    .primary {
+      width: 12em;
+      height: 10.5em;
+      margin: 0;
+      // Workaround for chrome: fixes weird distortion: `translateZ`
+      transform: translateZ(0);
+      clip-path: polygon(50% 0, 100% 100%, 0 100%);
+
+      .primary-inner {
+        width: 12em;
+        height: 14em;
+        background: conic-gradient(var(--color-wheel-stops1));
+        transform: rotate(180deg);
+      }
+    }
+
+    .secondary {
+      width: 14em;
+      height: 14em;
+      margin: 0;
+      background: transparent;
+      border-radius: 1000px;
+
+      .primary {
+        margin: auto;
+      }
+
+      .secondary-inner {
+        width: 14em;
+        height: 14em;
+        margin: auto;
+        background: conic-gradient(var(--color-wheel-stops2));
+        clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+      }
+    }
+
+    .tertiary {
+      width: 22em;
+      height: 22em;
+      padding: 4em 0;
+      background: conic-gradient(var(--color-wheel-stops3));
+      border-radius: 1000px;
+      transform: rotate(135deg);
+
+      .secondary {
+        margin: auto;
+        background: var(--color-wheel-bg);
+      }
+
+      .secondary-inner {
+        // Workaround for chrome: fixes weird distortion: `translateZ`
+        transform: rotate(225deg) translateZ(0);
+      }
+    }
+
+    .tertiary2 {
+      width: 30em;
+      height: 30em;
+      padding: 4em 0;
+      background: conic-gradient(var(--color-wheel-stops4));
+      border-radius: 1000px;
+      transform: rotate(128deg);
+
+      .tertiary{
+        margin: auto;
+        outline: 5px solid var(--color-wheel-bg);
+        transform: rotate(8deg);
+      }
+    }
+
+    .tertiary3 {
+      width: 38em;
+      height: 38em;
+      padding: 4em 0;
+      background: conic-gradient(var(--color-wheel-stops5));
+      border-radius: 1000px;
+      transform: rotate(123deg);
+
+      .tertiary2 {
+        margin: auto;
+        outline: 5px solid var(--color-wheel-bg);
+        transform: rotate(4deg);
+      }
+    }
+  }
+}

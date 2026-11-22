@@ -1,0 +1,1012 @@
+"""Test gamut mapping fitting."""
+import unittest
+import math
+from coloraide.everything import ColorAll as Color
+from coloraide import gamut
+from coloraide.gamut.fit_raytrace import raytrace_box
+from coloraide.gamut.fit_oklch_cubic import get_hue_data, get_max_chroma, get_max_chroma_cached
+from . import util
+
+
+class TestGamut(util.ColorAsserts, unittest.TestCase):
+    """Test gamut mapping/fitting."""
+
+    def test_coerce_to_rgb_dynamic_range(self):
+        """Test that coercing a cylindrical space to RGB retains the dynamic range of the original space."""
+
+        from coloraide.spaces.hsl import HSL
+
+        class HDRHSL(HSL):
+            NAME = 'hdr-hsl-test'
+            DYNAMIC_RANGE = 'hdr'
+
+        self.assertEqual(gamut.coerce_to_rgb(HSL()).DYNAMIC_RANGE, 'sdr')
+        self.assertEqual(gamut.coerce_to_rgb(HDRHSL()).DYNAMIC_RANGE, 'hdr')
+
+    def test_hue_clipping(self):
+        """Test hue clipping."""
+
+        self.assertEqual(Color('hsl(-120 50% 75% / 1)').clip().to_string(), 'hsl(240 50 75)')
+
+    def test_in_gamut(self):
+        """Test in gamut check."""
+
+        self.assertTrue(Color('red').in_gamut())
+
+    def test_out_of_gamut(self):
+        """Test in gamut check."""
+
+        self.assertFalse(Color('color(srgb 2 0 0)').in_gamut())
+
+    def test_in_gamut_other_space(self):
+        """Test if a color is in gamut in a different space."""
+
+        self.assertTrue(Color('red').convert('lch').in_gamut('srgb'))
+
+    def test_fit(self):
+        """Test fit."""
+
+        color = Color('color(srgb 2 0.5 0.5)')
+        self.assertFalse(color.in_gamut())
+        color2 = color.clone().fit()
+        self.assertIsNot(color, color2)
+        self.assertTrue(color2.in_gamut())
+
+    def test_fit_self(self):
+        """Test fit explicitly in own gamut."""
+
+        color = Color('color(srgb 2 0.5 0.5)')
+        self.assertFalse(color.in_gamut())
+        color2 = color.clone().fit('srgb')
+        self.assertIsNot(color, color2)
+        self.assertTrue(color2.in_gamut())
+
+    def test_fit_clip(self):
+        """Test fit."""
+
+        color = Color('color(srgb 2 0.5 0.5)')
+        self.assertFalse(color.in_gamut())
+        color2 = color.clone().fit(method="clip")
+        self.assertIsNot(color, color2)
+        self.assertTrue(color2.in_gamut())
+        color3 = color.clone().fit()
+        self.assertColorNotEqual(color2, color3)
+
+    def test_clip(self):
+        """Test fit."""
+
+        color = Color('color(srgb 2 0.5 0.5)')
+        self.assertFalse(color.in_gamut())
+        color2 = color.clone().clip()
+        self.assertIsNot(color, color2)
+        self.assertTrue(color2.in_gamut())
+        color3 = color.clone().fit()
+        self.assertColorNotEqual(color2, color3)
+
+    def test_clip_in_place(self):
+        """Test clip in place."""
+
+        color = Color('color(srgb 2 0.5 0.5)')
+        self.assertFalse(color.in_gamut())
+        color2 = color.clip()
+        self.assertIs(color, color2)
+        self.assertTrue(color2.in_gamut())
+        color3 = color.clone().fit()
+        self.assertColorEqual(color2, color3)
+
+    def test_clip_other_space(self):
+        """Test clip other space."""
+
+        color = Color('hsl(330 110% 50%)')
+        self.assertFalse(color.in_gamut('srgb'))
+        self.assertTrue(color.clip('srgb').in_gamut('srgb'))
+
+    def test_clip_undefined(self):
+        """Test that clip leaves undefined channels alone."""
+
+        color = Color('rgb(none 255.1 -0.1)')
+        self.assertFalse(color.in_gamut('srgb'))
+        color2 = color.clone().clip('srgb')
+        self.assertColorEqual(color2, Color('rgb(0 255 0)'))
+        self.assertTrue(color2.in_gamut('srgb'))
+
+    def test_clip_other_gamut(self):
+        """Test clip when a space defines another space as the gamut."""
+
+        color = Color('orgb', [0.2, 1, 0.8])
+        self.assertColorEqual(color.clip(), Color('color(--orgb 0.28313 0.1328 0.6872)'))
+
+    def test_clip_other_gamut_in_gamut(self):
+        """Test clip when a space defines another space as the gamut but it is in gamut."""
+
+        color = Color('orange').convert('orgb')
+        color2 = color.clone()
+        self.assertColorEqual(color.clip(), color2)
+
+    def test_sdr_extremes_low(self):
+        """Test SDR extreme low case."""
+
+        color = Color('hsl(none 0% -10%)')
+        self.assertColorEqual(color.fit(), Color('hsl(0 0% 0%)'))
+
+    def test_sdr_extremes_high(self):
+        """Test SDR extreme high case."""
+
+        color = Color('hsl(none 0% 110%)')
+        self.assertColorEqual(color.fit(), Color('hsl(0 0 100)'))
+
+    def test_hdr_extreme_high(self):
+        """Test HDR extreme high case."""
+
+        color = Color('color(--rec2100-pq 1.01 0.2 0)')
+        self.assertColorEqual(color.fit(), Color('color(rec2100-pq 1 0.67404 0.61331)'))
+
+    def test_hdr_extreme_low(self):
+        """Test HDR extreme low case."""
+
+        color = Color('color(--rec2100-pq -0.3 -0.2 0)')
+        self.assertColorEqual(color.fit(), Color('color(--rec2100-pq 0.0 0.0 0.0)'))
+
+    def test_bad_fit(self):
+        """Test fit."""
+
+        color = Color('color(srgb 2 0.5 0.5)')
+        self.assertFalse(color.in_gamut())
+        with self.assertRaises(ValueError):
+            color.fit(method="bad")
+
+    def test_fit_in_place(self):
+        """Test fit in place."""
+
+        color = Color('color(srgb 2 0.5 0.5)')
+        self.assertFalse(color.in_gamut())
+        color2 = color.fit()
+        self.assertIs(color, color2)
+        self.assertTrue(color2.in_gamut())
+
+    def test_fit_other_space(self):
+        """Test fit in other space."""
+
+        color = Color('hsl(330 110% 50%)')
+        self.assertFalse(color.in_gamut('srgb'))
+        self.assertTrue(color.fit('srgb').in_gamut('srgb'))
+
+    def test_out_of_gamut_other_space(self):
+        """Test if a color is in gamut in a different space."""
+
+        self.assertFalse(Color('color(srgb 2 0 0)').convert('lch').in_gamut('srgb'))
+
+    def test_fit_options(self):
+        """Test fit options."""
+
+        self.assertColorEqual(
+            Color('color(display-p3 0 1 0)').convert('srgb').fit(method='oklch-chroma', jnd=0.002),
+            Color('rgb(0 247.37 75.73)')
+        )
+
+        self.assertColorEqual(
+            Color('color(display-p3 0 1 0)').convert('srgb').fit(method='oklch-chroma', jnd=0.0),
+            Color('rgb(0 246.92 78.614)')
+        )
+
+    def test_fit_method_to_string(self):
+        """Test fit method to string."""
+
+        self.assertEqual(
+            Color('color(display-p3 0 1 0)').convert('srgb').to_string(fit='oklch-chroma'),
+            'rgb(0 251.37 40.734)'
+        )
+
+    def test_fit_options_to_string(self):
+        """Test fit options to string."""
+
+        self.assertEqual(
+            Color('color(display-p3 0 1 0)').convert('srgb').to_string(fit={'method': 'oklch-chroma', 'jnd': 0.002}),
+            'rgb(0 247.37 75.73)'
+        )
+
+    def test_minde_lab(self):
+        """Test MINDE in Lab."""
+
+        options = {"method": 'minde-chroma', "pspace": 'oklab'}
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.99673 0.99892 0.33034)')
+        )
+
+    def test_minde_adaptive_lightness_lab(self):
+        """Test MINDE adaptive lightness."""
+
+        options = {"method": 'minde-chroma', "pspace": 'oklab', "adaptive": 0.05}
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.99215 0.99432 0.32866)')
+        )
+
+        options['adaptive'] = 5
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.95641 0.95842 0.31554)')
+        )
+
+    def test_minde_adaptive_lightness_lch(self):
+        """Test MINDE adaptive lightness in ray trace."""
+
+        options = {"method": 'minde-chroma', "pspace": 'oklch', "adaptive": 0.05}
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.99215 0.99432 0.32866)')
+        )
+
+        options['adaptive'] = 5
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.95641 0.95842 0.31554)')
+        )
+
+    def test_scale(self):
+        """
+        Test conversion from a wavelength to a color with scaling.
+
+        We should have enough accuracy to scale in a linear RGB space and still get the same wavelength.
+        """
+
+        for w in range(360, 700, 1):
+            self.assertEqual(Color.from_wavelength('srgb', w, scale=False).fit(method='scale').wavelength()[0], w)
+
+    def test_scale_luminance(self):
+        """
+        Test conversion from a wavelength to a color with scaling and luminance preservation.
+
+        We should have enough accuracy to scale in a linear RGB space and still get the same wavelength, except when
+        luminance preservation forces the color to be achromatic, then wavelength will be undefined.
+        """
+
+        original = Color('rec2020', [1, 0.8, 0.8])
+        scaled_lum = original.clone().fit('srgb', method='scale-luminance', preserve_luminance=True)
+        self.assertTrue(math.isclose(original.luminance(), scaled_lum.luminance()))
+        self.assertTrue(original.wavelength()[0] == scaled_lum.wavelength()[0])
+
+    def test_scale_subtractive(self):
+        """Test a subtractive space."""
+
+        self.assertColorEqual(
+            Color('cmy', [1.1, 0.2, -0.01]).fit(method='scale'),
+            Color('color(--cmy 1 0.20566 0 / 1)')
+        )
+
+    def test_scale_polar(self):
+        """Test scale with polar."""
+
+        colors = [
+            c.fit('hpluv', method='scale')
+            for c in Color.steps(['oklch(90% 0.4 0)', 'oklch(90% 0.4 360)'], steps=100, space='oklch', hue='longer')
+        ]
+
+        self.assertColorEqual(colors[0], Color('oklch(0.57985 0.08457 0.10133)'))
+        self.assertColorEqual(colors[1], Color('oklch(0.57956 0.08284 3.1507)'))
+        self.assertColorEqual(colors[2], Color('oklch(0.57928 0.08128 5.9574)'))
+        self.assertColorEqual(colors[3], Color('oklch(0.57901 0.07989 8.528)'))
+        self.assertColorEqual(colors[4], Color('oklch(0.57876 0.07867 10.878)'))
+
+
+class TestRayTrace(util.ColorAsserts, unittest.TestCase):
+    """Test gamut mapping/fitting with ray tracing."""
+
+    def test_generic_raytrace_default(self):
+        """Test generic ray trace with an LCh space."""
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 0, 0]).fit('srgb', method='raytrace'),
+            Color('color(display-p3 0.92047 0.28549 0.21889)')
+        )
+
+    def test_generic_raytrace_lch(self):
+        """Test generic ray trace with an LCh space."""
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 0, 0]).fit('srgb', method='raytrace', pspace='lchuv'),
+            Color('color(display-p3 0.91916 0.25208 0.25208)')
+        )
+
+    def test_generic_raytrace_lab(self):
+        """Test generic ray trace with a Lab space."""
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 0, 0]).fit('srgb', method='raytrace', pspace='luv'),
+            Color('color(display-p3 0.91916 0.25208 0.25208)')
+        )
+
+    def test_raytrace_adaptive_lightness_lab(self):
+        """Test ray trace adaptive lightness in ray trace."""
+
+        options = {"method": 'raytrace', "pspace": 'oklab', "adaptive": 0.05}
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.98128 0.9861 0.32546)')
+        )
+
+        options['adaptive'] = 5
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.89593 0.90035 0.29412)')
+        )
+
+    def test_raytrace_adaptive_lightness_lch(self):
+        """Test ray trace adaptive lightness in ray trace."""
+
+        options = {"method": 'raytrace', "pspace": 'oklch', "adaptive": 0.05}
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.98128 0.9861 0.32546)')
+        )
+
+        options['adaptive'] = 5
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.89593 0.90035 0.29412)')
+        )
+
+    def test_raytrace_adaptive_lightness_generic_lab(self):
+        """Test ray trace adaptive lightness in ray trace using generic path."""
+
+        options = {"method": 'raytrace', "pspace": 'lab-d65', "adaptive": 0.05}
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.97355 0.94922 0.31413)')
+        )
+
+        options['adaptive'] = 5
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.83876 0.81766 0.26577)')
+        )
+
+    def test_raytrace_adaptive_lightness_generic_lch(self):
+        """Test ray trace adaptive lightness in ray trace using generic path."""
+
+        options = {"method": 'raytrace', "pspace": 'lch-d65', "adaptive": 0.05}
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.97355 0.94922 0.31413)')
+        )
+
+        options['adaptive'] = 5
+
+        self.assertColorEqual(
+            Color('display-p3', [1, 1, 0]).fit('srgb', **options),
+            Color('color(display-p3 0.83876 0.81766 0.26577)')
+        )
+
+    def test_edge_case_raytrace_adaptive_lightness_lch(self):
+        """Test edge case ray trace adaptive lightness."""
+
+        # Force projection out of range on high end.
+        options = {"method": 'raytrace', "pspace": 'lchuv', "adaptive": 0.5}
+        self.assertColorEqual(
+            Color('rec2020-oetf', [0, 0, 0.5]).fit('srgb', **options),
+            Color('color(--rec2020-oetf 0.06611 0.06611 0.45269)')
+        )
+
+    def test_sdr_extremes_low(self):
+        """Test SDR extreme low case."""
+
+        color = Color('oklch(-10% 0 none)')
+        self.assertColorEqual(color.fit('srgb', method='raytrace', pspace='oklch'), Color('oklch(0 0 none)'))
+
+    def test_sdr_extremes_high(self):
+        """Test SDR extreme high case."""
+
+        color = Color('oklch(110% 0 none)')
+        self.assertColorEqual(color.fit('srgb', method='raytrace', pspace='oklch'), Color('oklch(100% 0 none)'))
+
+    def test_non_rgb_space(self):
+        """Test coercion to RGB."""
+
+        color = Color('oklch(90% .4 270)')
+        self.assertColorEqual(color.fit('hpluv', method='raytrace', pspace='oklch'), Color('oklch(0.9 0.04254 270)'))
+
+        color = Color('oklch(90% .4 270)')
+        self.assertColorEqual(color.fit('okhsv', method='raytrace', pspace='oklch'), Color('oklch(0.9 0.04813 270)'))
+
+    def test_sdr_extremes_high_non_rgb_space(self):
+        """Test coercion of extreme high to RGB."""
+
+        color = Color('oklch(110% 0 none)')
+        self.assertColorEqual(color.fit('okhsl', method='raytrace', pspace='oklch'), Color('oklch(100% 0 none)'))
+
+    def test_sdr_extremes_low_non_rgb_space(self):
+        """Test failure with non-RGB space."""
+
+        color = Color('oklch(-10% 0 none)')
+        self.assertColorEqual(color.fit('okhsl', method='raytrace', pspace='oklch'), Color('oklch(0 0 none)'))
+
+    def test_trace_face1(self):
+        """Test tracing of face 1."""
+
+        color = Color('oklch(30% .4 160)')
+        self.assertColorEqual(color.fit('srgb', method='raytrace', pspace='oklch'), Color('oklch(0.3 0.06787 160)'))
+
+    def test_trace_face2(self):
+        """Test tracing of face 2."""
+
+        color = Color('oklch(90% .4 60)')
+        self.assertColorEqual(color.fit('srgb', method='raytrace', pspace='oklch'), Color('oklch(0.9 0.06478 60)'))
+
+    def test_trace_face3(self):
+        """Test tracing of face 3."""
+
+        color = Color('oklch(30% .4 10)')
+        self.assertColorEqual(color.fit('srgb', method='raytrace', pspace='oklch'), Color('oklch(0.3 0.11997 10)'))
+
+    def test_trace_face4(self):
+        """Test tracing of face 4."""
+
+        color = Color('oklch(90% .4 150)')
+        self.assertColorEqual(color.fit('srgb', method='raytrace', pspace='oklch'), Color('oklch(0.9 0.18156 150)'))
+
+    def test_trace_face5(self):
+        """Test tracing of face 5."""
+
+        color = Color('oklch(30% .4 100)')
+        self.assertColorEqual(color.fit('srgb', method='raytrace', pspace='oklch'), Color('oklch(0.3 0.06237 100)'))
+
+    def test_trace_face6(self):
+        """Test tracing of face 6."""
+
+        color = Color('oklch(90% .4 270)')
+        self.assertColorEqual(color.fit('srgb', method='raytrace', pspace='oklch'), Color('oklch(0.9 0.04813 270)'))
+
+    def test_trace_perpendicular(self):
+        """
+        Test perpendicular cases.
+
+        Cases are unlikely to occur, but were broken in the original implementation.
+        """
+
+        self.assertEqual(raytrace_box([-2, 0.5, 0.5], [2, 0.5, 0.5]), [0, 0.5, 0.5])
+        self.assertEqual(raytrace_box([0.5, -2, 0.5], [0.5, 2, 0.5]), [0.5, 0, 0.5])
+        self.assertEqual(raytrace_box([0.5, 0.5, -2], [0.5, 0.5, 2]), [0.5, 0.5, 0])
+
+        self.assertEqual(raytrace_box([2, 0.5, 0.5], [-2, 0.5, 0.5]), [1, 0.5, 0.5])
+        self.assertEqual(raytrace_box([0.5, 2, 0.5], [0.5, -2, 0.5]), [0.5, 1, 0.5])
+        self.assertEqual(raytrace_box([0.5, 0.5, 2], [0.5, 0.5, -2]), [0.5, 0.5, 1])
+
+        self.assertEqual(raytrace_box([0, 2, 0.5], [1, -2, 0.5]), [0.25, 1, 0.5])
+        self.assertEqual(raytrace_box([1, 2, 0.5], [0, -2, 0.5]), [0.75, 1, 0.5])
+
+        self.assertEqual(raytrace_box([0.25, 2, 0.5], [0.75, -2, 0.5]), [0.375, 1.0, 0.5])
+        self.assertEqual(raytrace_box([1, 2, 0.5], [0, -2, 0.5]), [0.75, 1.0, 0.5])
+
+    def test_ray_extend(self):
+        """Rays will extend out from the origin past the end."""
+
+        self.assertEqual(raytrace_box([2, 0.5, 0.5], [1.5, 0.5, 0.5]), [1.0, 0.5, 0.5])
+
+    def test_trace_miss(self):
+        """Test some cases that completely miss the box."""
+
+        self.assertEqual(raytrace_box([-1, -3, -1], [5, 6, 7]), [])
+        self.assertEqual(raytrace_box([0.5, 1.1, -2], [0.5, 1.1, 2]), [])
+
+        # Our use cases will discard hits that are caused by a point instead of a ray.
+        # It is feasible that some implementations would prefer to count this as a hit,
+        # but we prefer to ignore non-rays, in the context of gamut mapping, as they
+        # represent a point already on the surface which require no further work.
+        # Therefore, this case is a miss.
+        self.assertEqual(raytrace_box([1, 0, 0], [1, 0, 0]), [])
+
+    def test_ray_trace_no_intersect(self):
+        """Test a scenario where an intersect cannot be found in an iteration."""
+
+        # When the intersect is not found, the last good intersect will be selected.
+        self.assertColorEqual(
+            Color('lch-d65', [0.1, 50, 270]).fit('srgb', method='raytrace', pspace='hct', adaptive=0.05),
+            Color('color(--lch-d65 0.08441 0.22909 34.545)')
+        )
+
+    def test_ray_trace_very_close_to_gamut(self):
+        """Test a scenario where a color is very close to the gamut."""
+
+        self.assertColorEqual(
+            Color('srgb', [1.0000000000000004, 0.19694944045886786, 0.026717808177518357]).fit(method='raytrace'),
+            Color('rgb(255 50.222 6.813)')
+        )
+
+        self.assertColorEqual(
+            Color('oklch', [0.95, 0.08189384451629673, 151.5]).fit('srgb', method='raytrace'),
+            Color('oklch(0.95 0.08189 151.5)')
+        )
+
+        self.assertColorEqual(
+            Color('oklch', [0.9921875, 0.03125, 195.75]).fit('srgb', method='raytrace'),
+            Color('oklch(0.99219 0.01099 195.75)')
+        )
+
+        self.assertColorEqual(
+            Color('oklch', [0.9999999999990905, 0.4, 105.5]).fit('srgb', method='raytrace'),
+            Color('oklch(1 0 0)')
+        )
+
+        self.assertColorEqual(
+            Color('oklch', [0.0001220703125, 0.4, 19.75]).fit('srgb', method='raytrace'),
+            Color('oklch(0.00012 0.00005 19.75)')
+        )
+        self.assertColorEqual(
+            Color('oklch', [0.95, 0.09041434578382133, 152.5]).fit('display-p3', method='raytrace'),
+            Color('oklch(0.95 0.09041 152.5)')
+        )
+        self.assertColorEqual(
+            Color('oklch', [0.95, 0.10357579481449558, 156.5]).fit('rec2020', method='raytrace'),
+            Color('oklch(0.95 0.10358 156.5)')
+        )
+
+    def test_ray_trace_very_dark_out_of_gamut(self):
+        """
+        Test that the ray threshold scales with the magnitude of the coordinates.
+
+        Linear RGB values are roughly `L ** 3`, so for very dark colors, rays that are legitimately long relative
+        to the color can still be smaller than an absolute threshold. Such rays must not be discarded, or chroma
+        and hue will not be reduced along the proper path. Comparisons are done relative to lightness as the
+        absolute values are too small to be compared directly.
+        """
+
+        for lightness, chroma, hue, expected_ratio, expected_hue in (
+            (3.2e-6, 0.33, 142.6, 0.339, 142.61),
+            (1e-5, 0.4, 250.0, 0.296, 251.62),
+            (5e-5, 0.3, 30.0, 0.391, 30.91)
+        ):
+            c = Color('oklch', [lightness, chroma, hue]).fit('srgb', method='raytrace').convert('oklch')
+            self.assertCompare(c['lightness'] / lightness, 1.0, 3)
+            self.assertCompare(c['chroma'] / lightness, expected_ratio, 3)
+            self.assertCompare(c['hue'], expected_hue, 2)
+
+    def test_ray_trace_large_gamut_close_to_surface(self):
+        """
+        Test that the ray threshold scales with the magnitude of the coordinates for large (HDR) gamuts.
+
+        ACEScg has a maximum of 65504, so floating point noise from conversions is much larger than an absolute
+        threshold. Colors just outside the gamut should be mapped to the surface at the same lightness, hue, and
+        maximum chroma instead of being thrown off by noise in a degenerate ray.
+        """
+
+        for lightness, chroma, hue, expected_chroma in (
+            (39.60122570393925, 0.724552496102874, 10.933097235863002, 0.72455),
+            (39.70448196515093, 0.4033122470304843, 302.55678982054434, 0.40331),
+            (35.99018212562615, 6.565474388119603, 336.81235979206247, 6.56547),
+            (39.1274450263796, 1.4455118736267205, 348.07538635801905, 1.44551)
+        ):
+            c = Color('oklch', [lightness, chroma, hue]).fit('acescg', method='raytrace').convert('oklch')
+            self.assertCompare(c['lightness'], lightness, 4)
+            self.assertCompare(c['chroma'], expected_chroma, 4)
+            self.assertCompare(c['hue'], hue, 3)
+
+
+class TestHCTGamut(util.ColorAsserts, unittest.TestCase):
+    """
+    Test HCT gamut mapping by producing tonal maps.
+
+    When we are off, we seem to only be off on a given channel by at most < +/- 1 (between 0 - 255 floating point).
+    As this is not a 1:1 port of the Material utilities, different precision of matrices and different gamut mapping
+    can cause slight differences in results. We are not aiming to match the Material implementation, but aiming to match
+    the intent.
+    """
+
+    def test_blue(self):
+        """Test blue tonal maps."""
+
+        hct = Color('#0000ff').convert('hct')
+        tones = [100, 95, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0]
+        expect = ['#ffffff', '#f1efff', '#e0e0ff', '#bec2ff',
+                  '#9da3ff', '#7c84ff', '#5a64ff', '#343dff',
+                  '#0000ef', '#0001ac', '#00006e', '#000000']
+
+        # A channel should be off no more than by 1 in a scale of 0 - 255
+        # Due to the fact that Material uses less precise matrices
+        options = {'method': 'hct-chroma', 'jnd': 0.0}
+        for tone, answer in zip(tones, expect):
+            s1 = [c * 255 for c in hct.clone().set('tone', tone).convert('srgb').fit(**options)[:-1]]
+            s2 = [c * 255 for c in Color(answer)[:-1]]
+            for c1, c2 in zip(s1, s2):
+                self.assertTrue(math.isclose(c1, c2, abs_tol=1.0))
+
+        hct.set('chroma', 16)
+        expect = ['#ffffff', '#f1efff', '#e1e0f9', '#c5c4dd',
+                  '#a9a9c1', '#8f8fa6', '#75758b', '#5c5d72',
+                  '#444559', '#2e2f42', '#191a2c', '#000000']
+
+        for tone, answer in zip(tones, expect):
+            s1 = [c * 255 for c in hct.clone().set('tone', tone).convert('srgb').fit(**options)[:-1]]
+            s2 = [c * 255 for c in Color(answer)[:-1]]
+            for c1, c2 in zip(s1, s2):
+                self.assertTrue(math.isclose(c1, c2, abs_tol=1.0))
+
+    def test_inside_but_high_chroma(self):
+        """Test gamut mapping a color with high chroma, but inside gamut due to technically of algorithm."""
+
+        self.assertColorEqual(
+            Color('hct', [270, 30, 0]).fit('srgb', method='hct-chroma'),
+            Color('hct', [float('nan'), 0, 0])
+        )
+
+
+class TestPointerGamut(util.ColorAsserts, unittest.TestCase):
+    """Test Pointer's gamut."""
+
+    def test_in_pointer_gamut_too_light(self):
+        """Test gamut check when too light."""
+
+        self.assertFalse(Color('white').in_gamut('pointer-gamut'))
+
+    def test_in_pointer_gamut_too_dark(self):
+        """Test gamut check when too dark."""
+
+        self.assertFalse(Color('black').in_gamut('pointer-gamut'))
+
+    def test_in_pointer_gamut(self):
+        """Test gamut check in gamut."""
+
+        self.assertTrue(Color('orange').in_gamut('pointer-gamut'))
+
+    def test_out_of_pointer_gamut(self):
+        """Test gamut check out of gamut."""
+
+        self.assertFalse(Color('red').in_gamut('pointer-gamut'))
+
+    def test_fit_pointer_gamut_too_light(self):
+        """Test fitting gamut when too light."""
+
+        self.assertColorEqual(Color('white').fit('pointer-gamut'), Color('rgb(226.33 226.33 226.33)'))
+
+    def test_fit_pointer_gamut_too_dark(self):
+        """Test fitting gamut when too dark."""
+
+        self.assertColorEqual(Color('black').fit('pointer-gamut'), Color('rgb(37.667 37.667 37.667)'))
+
+    def test_fit_pointer_gamut(self):
+        """Test gamut check out of gamut."""
+
+        self.assertColorEqual(Color('red').fit('pointer-gamut'), Color('rgb(244 46.539 23.139)'))
+
+    def test_pointer_boundary_too_light(self):
+        """Test when pointer boundary is request is too light."""
+
+        with self.assertRaises(ValueError):
+            gamut.pointer.pointer_gamut_boundary(0)
+
+    def test_pointer_boundary_too_dark(self):
+        """Test when pointer boundary is request is too dark."""
+
+        with self.assertRaises(ValueError):
+            gamut.pointer.pointer_gamut_boundary(100)
+
+    def test_pointer_boundary_mid(self):
+        """Test when pointer boundary request."""
+
+        boundary = gamut.pointer.pointer_gamut_boundary(50)
+        # Test a sample of the values
+        test = [boundary[0], boundary[5], boundary[8]]
+        expected = [[0.47971142940104206, 0.2384179501289976, 0.18418651851244416],
+                    [0.634800855490809, 0.35129621215430396, 0.18418651851244416],
+                    [0.49892034937725527, 0.45347791373057683, 0.18418651851244416]]
+
+        for coords1, coords2 in zip(test, expected):
+            [self.assertCompare(a, b) for a, b in zip(coords1, coords2)]
+
+    def test_pointer_boundary_max(self):
+        """Test pointer boundary max request."""
+
+        boundary = gamut.pointer.pointer_gamut_boundary()
+        # Test a sample of the values
+        test = [boundary[0], boundary[5], boundary[8]]
+        expected = [[0.5076988072583095, 0.2255929648510513, 0.11250973799663784],
+                    [0.634800855490809, 0.35129621215430396, 0.18418651851244416],
+                    [0.5260711281340981, 0.462168144862833, 0.482781043708229]]
+
+        for coords1, coords2 in zip(test, expected):
+            [self.assertCompare(a, b) for a, b in zip(coords1, coords2)]
+
+
+class TestMacadamLimits(util.ColorAsserts, unittest.TestCase):
+    """Test Macadam limits."""
+
+    def test_in_macadam_limits_too_light(self):
+        """Test gamut check when too light."""
+
+        self.assertFalse(Color('srgb', [1.1, 1.1, 1.1]).in_gamut('macadam-limits'))
+
+    def test_in_macadam_limits_too_dark(self):
+        """Test gamut check when too dark."""
+
+        self.assertFalse(Color('srgb', [-0.1, -0.1, -0.1]).in_gamut('macadam-limits'))
+    def test_in_macadam_limits(self):
+        """Test gamut check in gamut."""
+
+        self.assertTrue(Color('orange').in_gamut('macadam-limits'))
+    def test_out_of_macadam_limits(self):
+        """Test gamut check out of gamut."""
+
+        self.assertFalse(Color('rec2020', [0, 1, 0]).in_gamut('macadam-limits'))
+    def test_fit_macadam_limits_too_light(self):
+        """Test fitting gamut when too light."""
+
+        self.assertColorEqual(Color('srgb', [1.1, 1.1, 1.1]).fit('macadam-limits'), Color('white'))
+
+    def test_fit_macadam_limits_too_dark(self):
+        """Test fitting gamut when too dark."""
+
+        self.assertColorEqual(Color('srgb', [-0.1, -0.1, -0.1]).fit('macadam-limits'), Color('black'))
+
+    def test_fit_macadam_limits_gamut(self):
+        """Test gamut check out of gamut."""
+
+        self.assertColorEqual(
+            Color('rec2020', [0, 1, 0]).fit('macadam-limits'),
+            Color('color(rec2020 0.46617 0.96758 0.46617)')
+        )
+
+    def test_macadam_limits_too_light(self):
+        """Test when pointer boundary is request is too light."""
+
+        with self.assertRaises(ValueError):
+            gamut.macadam_limits.macadam_limits(-0.01)
+
+    def test_macadam_limits_too_dark(self):
+        """Test when pointer boundary is request is too dark."""
+
+        with self.assertRaises(ValueError):
+            gamut.macadam_limits.macadam_limits(1.01)
+
+    def test_macadam_limits_mid(self):
+        """Test when pointer boundary request."""
+
+        boundary = gamut.macadam_limits.macadam_limits(0.5)
+        # Test a sample of the values
+        test = [boundary[0], boundary[5], boundary[8]]
+        expected = [[0.48014756568499994, 0.329, 0.5],
+                    [0.4956350272100697, 0.3450047410426876, 0.5],
+                    [0.5064113262377211, 0.3562243514807566, 0.5]]
+
+        for coords1, coords2 in zip(test, expected):
+            [self.assertCompare(a, b) for a, b in zip(coords1, coords2)]
+
+    def test_macadam_limits_max(self):
+        """Test pointer boundary max request."""
+
+        boundary = gamut.macadam_limits.macadam_limits()
+        # Test a sample of the values
+        test = [boundary[0], boundary[5], boundary[8]]
+        expected = [[0.6707956551209999, 0.329, 1],
+                    [0.6418735466024112, 0.35779895366033343, 1],
+                    [0.626504624034622, 0.37310236379529593, 1]]
+
+        for coords1, coords2 in zip(test, expected):
+            [self.assertCompare(a, b) for a, b in zip(coords1, coords2)]
+
+
+class TestVisibleSpectrum(util.ColorAsserts, unittest.TestCase):
+    """Test visible spectrum."""
+
+    def test_visible_spectrum(self):
+        """Test gamut check in visible spectrum."""
+
+        self.assertTrue(Color('rec2020', [1, 1, 1]).in_gamut('visible-spectrum'))
+        self.assertTrue(Color('rec2020', [1, 0, 0]).in_gamut('visible-spectrum'))
+        self.assertTrue(Color('rec2020', [0, 1, 0]).in_gamut('visible-spectrum'))
+        self.assertTrue(Color('rec2020', [0, 0, 1]).in_gamut('visible-spectrum'))
+        self.assertFalse(Color('rec2020', [1.1, 1.1, 1.1]).in_gamut('visible-spectrum'))
+        self.assertFalse(Color('prophoto-rgb', [0, 0, 1]).in_gamut('visible-spectrum'))
+
+    def test_visible_spectrum_xy_threshold(self):
+        """Test gamut check using xy threshold."""
+
+        # Rec. 2020 is right on the spectral locus, but uses rounded primaries
+        self.assertTrue(Color('rec2020', [1, 1, 1]).in_gamut('visible-spectrum', xy_tolerance=0))
+        self.assertFalse(Color('rec2020', [1, 0, 0]).in_gamut('visible-spectrum', xy_tolerance=0))
+        self.assertFalse(Color('rec2020', [0, 1, 0]).in_gamut('visible-spectrum', xy_tolerance=0))
+        self.assertFalse(Color('rec2020', [0, 0, 1]).in_gamut('visible-spectrum', xy_tolerance=0))
+
+    def test_visible_spectrum_xy_threshold_none(self):
+        """Test gamut check using assuming the normal threshold for xy threshold."""
+
+        # Rec. 2020 is right on the spectral locus, but uses rounded primaries
+        self.assertTrue(Color('rec2020', [1, 1, 1]).in_gamut('visible-spectrum', xy_tolerance=None))
+        self.assertTrue(Color('rec2020', [1, 0, 0]).in_gamut('visible-spectrum', xy_tolerance=None))
+        self.assertFalse(Color('rec2020', [0, 1, 0]).in_gamut('visible-spectrum', xy_tolerance=None))
+        self.assertFalse(Color('rec2020', [0, 0, 1]).in_gamut('visible-spectrum', xy_tolerance=None))
+
+    def test_fit_visible_spectrum(self):
+        """Fit colors to visible spectrum."""
+
+        self.assertTrue(
+            Color('rec2020', [1.1, 1.1, 1.1]).fit('visible-spectrum'),
+            Color('rec2020', [1, 1, 1])
+        )
+        self.assertColorEqual(
+            Color('prophoto-rgb', [0, 1, 0]).fit('visible-spectrum'),
+            Color('color(prophoto-rgb 0.14843 0.99272 0.14843)')
+        )
+        self.assertColorEqual(
+            Color('prophoto-rgb', [0, 0, 1]).fit('visible-spectrum'),
+            Color('color(prophoto-rgb 0.00137 0.00137 0.0158)')
+        )
+
+    def test_fit_visible_spectrum_threshold(self):
+        """Fit colors to visible spectrum."""
+
+        # Custom tolerance
+        self.assertColorEqual(
+            Color('rec2020', [0, 1, 0]).fit('visible-spectrum', xy_tolerance=0),
+            Color('color(rec2020 0.03137 0.99995 0.03137)')
+        )
+        self.assertColorEqual(
+            Color('rec2020', [0, 0, 1]).fit('visible-spectrum', xy_tolerance=None),
+            Color('color(rec2020 0.03558 0.03558 0.99779)')
+        )
+
+        # Normal tolerance
+        self.assertColorEqual(
+            Color('rec2020', [1, 0, 0]).fit('visible-spectrum'),
+            Color('rec2020', [1, 0, 0])
+        )
+        self.assertColorEqual(
+            Color('rec2020', [0, 1, 0]).fit('visible-spectrum'),
+            Color('rec2020', [0, 1, 0])
+        )
+        self.assertColorEqual(
+            Color('rec2020', [0, 0, 1]).fit('visible-spectrum'),
+            Color('rec2020', [0, 0, 1])
+        )
+
+    def test_ignore_luminance(self):
+        """Test ignore luminance."""
+
+        self.assertFalse(Color('rec2100-hlg', [1, 1, 1]).in_gamut('visible-spectrum'))
+        self.assertTrue(Color('rec2100-hlg', [1, 1, 1]).in_gamut('visible-spectrum', ignore_luminance=True))
+
+        self.assertColorEqual(
+            Color('rec2100-hlg', [0, 1, 0]).fit('visible-spectrum'),
+            Color('color(rec2100-hlg 0 0.82507 0)')
+        )
+        self.assertColorEqual(
+            Color('rec2100-hlg', [0, 1, 0]).fit('visible-spectrum', ignore_luminance=True),
+            Color('color(rec2100-hlg 0 1 0)')
+        )
+
+
+class TestOkLChCubic(util.ColorAsserts, unittest.TestCase):
+    """Test OkLCh cubic gamut mapping."""
+
+    def test_map(self):
+        """Test gamut mapping."""
+
+        self.assertColorEqual(
+            Color('rec2020', [1, 0, 0]).fit('display-p3', method='oklch-cubic').convert('display-p3'),
+            Color('color(display-p3 1 0.28951 0.29785)')
+        )
+        self.assertColorEqual(
+            Color('rec2020', [0, 1, 0]).fit('display-p3', method='oklch-cubic').convert('display-p3'),
+            Color('color(display-p3 0 0.95922 0.42473)')
+        )
+        self.assertColorEqual(
+            Color('rec2020', [0, 0, 1]).fit('display-p3', method='oklch-cubic').convert('display-p3'),
+            Color('color(display-p3 0 0.31148 0.55913)')
+        )
+        self.assertColorEqual(
+            Color('rec2020', [1.1, 1.1, 1.1]).fit('display-p3', method='oklch-cubic').convert('display-p3'),
+            Color('color(display-p3 1 1 1)')
+        )
+        self.assertColorEqual(
+            Color('rec2020', [-0.1, -0.1, -0.1]).fit('display-p3', method='oklch-cubic').convert('display-p3'),
+            Color('color(display-p3 0 0 0)')
+        )
+
+    def test_map_white_point(self):
+        """Test gamut mapping with different white point."""
+
+        self.assertColorEqual(
+            Color('oklch', [0.5, 0.8, 100]).fit('prophoto-rgb', method='oklch-cubic').convert('prophoto-rgb'),
+            Color('color(prophoto-rgb 0.32585 0.31658 0)')
+        )
+
+    def test_cached_map(self):
+        """Test gamut mapping with hue data cache."""
+
+        self.assertColorEqual(
+            Color('rec2020', [1, 0, 0]).fit('display-p3', method='oklch-cubic', cache=True).convert('display-p3'),
+            Color('color(display-p3 1 0.28951 0.29785)')
+        )
+        self.assertColorEqual(
+            Color('rec2020', [0, 1, 0]).fit('display-p3', method='oklch-cubic', cache=True).convert('display-p3'),
+            Color('color(display-p3 0 0.95922 0.42473)')
+        )
+        self.assertColorEqual(
+            Color('rec2020', [0, 0, 1]).fit('display-p3', method='oklch-cubic', cache=True).convert('display-p3'),
+            Color('color(display-p3 0 0.31148 0.55913)')
+        )
+        self.assertColorEqual(
+            Color('rec2020', [1.1, 1.1, 1.1]).fit('display-p3', method='oklch-cubic', cache=True).convert('display-p3'),
+            Color('color(display-p3 1 1 1)')
+        )
+        self.assertColorEqual(
+            Color(
+                'rec2020', [-0.1, -0.1, -0.1]
+            ).fit('display-p3', method='oklch-cubic', cache=True).convert('display-p3'),
+            Color('color(display-p3 0 0 0)')
+        )
+
+        self.assertTrue(get_hue_data.cache_info().currsize != 0)
+        Color('rec2020', [1, 0, 0]).fit('display-p3', method='oklch-cubic', clear_cache=True)
+        self.assertTrue(get_hue_data.cache_info().currsize == 0)
+
+    def test_hdr_max_lightness(self):
+        """Test that HDR spaces use the HDR lightness limit and not the SDR limit."""
+
+        mx = Color('rec2100-hlg', [1, 1, 1]).convert('rec2100-linear')[0]
+        max_l = mx ** (1 / 3)
+
+        # At or above the maximum lightness, we get the linear maximum, not SDR white
+        for l in (max_l, max_l + 1):
+            c = Color('oklch', [l, 0.2, 120]).fit('rec2100-hlg', method='oklch-cubic')
+            self.assertColorEqual(c.convert('rec2100-linear'), Color('rec2100-linear', [mx, mx, mx]))
+            self.assertColorEqual(c.convert('rec2100-hlg'), Color('rec2100-hlg', [1, 1, 1]))
+
+        # Lightness above SDR is preserved and the result lands on the HDR gamut surface
+        for cache in (False, True):
+            c = Color('oklch', [1.3, 0.4, 250]).fit('rec2100-hlg', method='oklch-cubic', cache=cache)
+            self.assertAlmostEqual(c.convert('oklch')['lightness'], 1.3, places=4)
+            coords = c.convert('rec2100-linear')[:-1]
+            self.assertTrue(all(-1e-6 <= x <= mx + 1e-6 for x in coords))
+            self.assertTrue(any(abs(x) < 1e-6 or abs(x - mx) < 1e-6 for x in coords))
+            self.assertTrue(c.in_gamut('rec2100-hlg', tolerance=1e-6))
+
+    def test_hdr_cache_matches_uncached(self):
+        """Test cached and uncached solvers agree for HDR gamuts."""
+
+        for l in (0.3, 1.0, 1.4):
+            for h in (30, 140, 260, 330):
+                orig = Color('oklch', [l, 1.0, h])
+                self.assertColorEqual(
+                    orig.clone().fit('rec2100-hlg', method='oklch-cubic'),
+                    orig.clone().fit('rec2100-hlg', method='oklch-cubic', cache=True)
+                )
+
+    def test_abstract_minimum(self):
+        """Test that a non-zero minimum (not used by any registered space) is solved on both paths."""
+
+        name = 'rec2020-linear'
+        cs = Color.CS_MAP[name]
+        cat = Color.CHROMATIC_ADAPTATION
+        adapt = Color.CAT_MAP[cat]
+
+        for mn, mx in ((0.05, 1.0), (0.05, 2.5), (-0.1, 1.0)):
+            for l in (0.4, 0.7, 0.95):
+                for h in (30, 140, 200, 300):
+                    c1 = get_max_chroma(name, cs, cat, adapt, l, h, mn, mx)
+                    c2 = get_max_chroma_cached(name, cs, cat, adapt, l, 5.0, h, mn, mx)
+                    self.assertAlmostEqual(c1, c2, places=8)
+
+                    # On the surface: in range, with a channel on a bound, and just past it is out of range
+                    coords = Color('oklch', [l, c1, h]).convert(name, norm=False)[:-1]
+                    self.assertTrue(all(mn - 1e-7 <= x <= mx + 1e-7 for x in coords))
+                    self.assertTrue(any(abs(x - mn) < 1e-7 or abs(x - mx) < 1e-7 for x in coords))
+                    coords = Color('oklch', [l, c1 + 1e-4, h]).convert(name, norm=False)[:-1]
+                    self.assertFalse(all(mn <= x <= mx for x in coords))
+
+    def test_bad_space(self):
+        """Test unsupported space."""
+
+        with self.assertRaises(ValueError):
+            Color('rec2020', [1, 0, 0]).fit('hpluv', method='oklch-cubic')
