@@ -213,3 +213,104 @@ class TestCCTSpecificCases(util.ColorAsserts, unittest.TestCase):
         assert math.isclose(cct, cct2, rel_tol=0.00001, abs_tol=0.00001)
         assert math.isclose(duv, duv2, rel_tol=0.00001, abs_tol=0.00001)
 
+
+class TestRobertson1968LowTempSign(util.ColorAssertsPyTest):
+    """
+    Test Duv sign behavior through the low-temperature table and cusp transition.
+
+    The low-temperature portion of the extended Robertson table has positive
+    isotherm slopes; the cusp transition around 1625.8 K switches their sign.
+
+    The documents define positive Duv as the side above the Planckian curve
+    (the warmer side). The read sign must match the generated sign everywhere,
+    and both registered CCT methods must agree on the sign of the same uv point.
+    """
+
+    # Interior of the defective band: temperatures strictly below the cusp
+    # (~1625.8 K) where the extended table's isotherm slopes are positive.
+    BAND_TEMPS = [1000, 1050, 1100, 1200, 1300, 1400, 1500, 1550, 1590, 1595, 1599]
+    # The two edges of the band around the cusp, including the mired 625 (1600 K)
+    # LUT node and the straddling 600/625 pair on both sides of the cusp.
+    EDGE_TEMPS = [1600, 1601, 1605, 1610, 1620, 1624, 1625, 1626, 1630, 1640, 1650, 1667]
+    BAND_DUVS = [-0.05, -0.03, -0.02, -0.01, 0.0, 0.01, 0.02, 0.03, 0.05]
+
+    @pytest.mark.parametrize('cct', BAND_TEMPS)
+    @pytest.mark.parametrize('duv', BAND_DUVS)
+    def test_band_round_trip(self, cct, duv):
+        """Generated and read Duv must keep the documented sign inside the band."""
+
+        cct2, duv2 = Color.blackbody(
+            'xyz-d65', cct, duv, scale=False, method='robertson-1968'
+        ).cct(method='robertson-1968')
+
+        assert math.isclose(cct2, cct, rel_tol=0.0001, abs_tol=0.0001)
+        if duv == 0.0:
+            assert abs(duv2) < 1e-9
+        else:
+            assert math.copysign(1.0, duv2) == math.copysign(1.0, duv)
+            assert math.isclose(duv2, duv, rel_tol=0.00001, abs_tol=0.00001)
+
+    @pytest.mark.parametrize('cct', EDGE_TEMPS)
+    @pytest.mark.parametrize('duv', BAND_DUVS)
+    def test_edge_round_trip(self, cct, duv):
+        """The cusp transition and both band edges must preserve the Duv sign."""
+
+        cct2, duv2 = Color.blackbody(
+            'xyz-d65', cct, duv, scale=False, method='robertson-1968'
+        ).cct(method='robertson-1968')
+
+        assert math.isclose(cct2, cct, rel_tol=0.0001, abs_tol=0.0001)
+        if duv == 0.0:
+            assert abs(duv2) < 1e-9
+        else:
+            assert math.copysign(1.0, duv2) == math.copysign(1.0, duv)
+            assert math.isclose(duv2, duv, rel_tol=0.00001, abs_tol=0.00001)
+
+    @pytest.mark.parametrize('cct', BAND_TEMPS + EDGE_TEMPS)
+    @pytest.mark.parametrize('duv', [-0.03, -0.02, 0.02, 0.03])
+    def test_cross_method_sign_agreement(self, cct, duv):
+        """Both registered methods must read the same Duv sign for one uv point."""
+
+        # Build the uv point with each generator in turn and read it with both.
+        for generator in ('robertson-1968', 'ohno-2013'):
+            uv, name = Color.CCT_MAP[generator].from_cct(cct, duv)
+            assert name == 'uv-1960'
+            color = Color.chromaticity('xyz-d65', uv, name, scale=False)
+            robertson_duv = color.cct(method='robertson-1968')[1]
+            ohno_duv = color.cct(method='ohno-2013')[1]
+            assert math.copysign(1.0, robertson_duv) == math.copysign(1.0, duv)
+            assert math.copysign(1.0, ohno_duv) == math.copysign(1.0, duv)
+
+    @pytest.mark.parametrize('cct', BAND_TEMPS + EDGE_TEMPS)
+    def test_locus_points_read_zero_duv(self, cct):
+        """Points on the exact Planckian locus must read a near-zero Duv."""
+
+        uv, name = Color.CCT_MAP['ohno-2013'].from_cct(cct, 0.0)
+        color = Color.chromaticity('xyz-d65', uv, name, scale=False)
+        cct2, duv2 = color.cct(method='robertson-1968')
+        assert math.isclose(cct2, cct, rel_tol=0.002, abs_tol=2.0)
+        assert abs(duv2) < 0.001
+
+    def test_custom_table_keeps_sign(self):
+        """A custom mired table / white point registration must not reintroduce the flip."""
+
+        from coloraide.temperature import robertson_1968
+        from coloraide import cmfs
+        from coloraide import cat
+
+        class Custom(Color):
+            CCT = 'robertson-1968'
+
+        Custom.register(
+            robertson_1968.Robertson1968(cmfs.CIE_1931_2DEG, cat.WHITES['2deg']['D50']),
+            overwrite=True
+        )
+
+        for cct in (1000, 1200, 1500, 1600, 1625):
+            for duv in (-0.02, 0.02):
+                cct2, duv2 = Custom.blackbody(
+                    'xyz-d65', cct, duv, scale=False, method='robertson-1968'
+                ).cct(method='robertson-1968')
+                assert math.isclose(cct2, cct, rel_tol=0.0001, abs_tol=0.0001)
+                assert math.copysign(1.0, duv2) == math.copysign(1.0, duv)
+

@@ -164,7 +164,6 @@ class Robertson1968(CCT):
         """Calculate a color's CCT."""
 
         dip = kelvin = duv = 0.0
-        sign = -1
         u, v = color.split_chromaticity(self.CHROMATICITY)[:-1]
         end = len(self.table) - 1
 
@@ -195,6 +194,26 @@ class Robertson1968(CCT):
 
                 # Calculate Duv
                 du, dv = self.calc_du_dv(previous, current, 1 - factor)
+
+                # The isotherm normals produced by `calc_du_dv` point toward the
+                # negative Duv side (below the Planckian curve) on the high
+                # temperature side where the isotherm slopes are negative, so the
+                # projection needs a negative multiplier there. On the low
+                # temperature side, where the extended table gives positive
+                # isotherm slopes, the same normals point toward the positive Duv
+                # side (above the curve) and need a positive multiplier.
+                #
+                # The single line pair whose two entries straddle the Planckian
+                # cusp (their slopes have opposite signs) is handled by the
+                # discontinuity flip inside `calc_du_dv`, which reorients its
+                # normal to the negative Duv side, so it takes the negative
+                # multiplier as well. A hardcoded negative sign here used to
+                # invert every Duv reading on the positive-slope, low
+                # temperature portion of the table.
+                if previous.slope > 0.0 and current.slope > 0.0:
+                    sign = 1.0
+                else:
+                    sign = -1.0
                 duv = sign * (
                     du * (u - alg.lerp(previous.u, current.u, factor)) +
                     dv * (v - alg.lerp(previous.v, current.v, factor))
